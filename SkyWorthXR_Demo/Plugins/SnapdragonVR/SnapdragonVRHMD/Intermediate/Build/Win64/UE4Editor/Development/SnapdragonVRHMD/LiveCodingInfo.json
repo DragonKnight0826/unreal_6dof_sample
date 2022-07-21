@@ -1,0 +1,27 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.SnapdragonVRHMD.cpp.obj": [
+			"FGSXRRenderBridge.cpp.obj",
+			"FGSXRStereoLayer.cpp.obj",
+			"FGSXRSwapChain.cpp.obj",
+			"SnapdragonVRHMD.cpp.obj",
+			"SnapdragonVRHMD_CustomPresent.cpp.obj",
+			"SnapdragonVRHMD_CustomPresent_OpenGLES.cpp.obj",
+			"SnapdragonVRHMD_CustomPresent_Vulkan.cpp.obj",
+			"SnapdragonVRHMD_TextureSetProxy.cpp.obj",
+			"SnapdragonVRHMD_TextureSetProxy_OpenGLES.cpp.obj",
+			"SnapdragonVRHMD_TextureSetProxy_Vulkan.cpp.obj",
+			"SnapdragonVRHMDEventManager.cpp.obj",
+			"SnapdragonVRHMDFunctionLibrary.cpp.obj",
+			"SnapdragonVRHMDModule.cpp.obj",
+			"SnapdragonVRHMDRender.cpp.obj",
+			"SnapdragonXR_CVars.cpp.obj"
+		],
+		"Module.SnapdragonVRHMD.gen.cpp.obj": [
+			"SnapdragonVRHMD.init.gen.cpp.obj",
+			"SnapdragonVRHMDEventManager.gen.cpp.obj",
+			"SnapdragonVRHMDFunctionLibrary.gen.cpp.obj"
+		]
+	}
+}

@@ -1,0 +1,14 @@
+/NOLOGO
+/errorReport:prompt
+/MACHINE:x64
+/SUBSYSTEM:WINDOWS
+/DEF
+/NAME:"UE4Editor-SnapdragonVRHMD.dll"
+/IGNORE:4221
+/NODEFAULTLIB
+"F:\UnrealObject\SkyWorthXR_Demo\Intermediate\Build\Win64\SkyWorthXR_DemoEditor\Development\UnrealEd\SharedPCH.UnrealEd.ShadowErrors.h.obj"
+"F:\UnrealObject\SkyWorthXR_Demo\Plugins\SnapdragonVR\SnapdragonVRHMD\Intermediate\Build\Win64\UE4Editor\Development\SnapdragonVRHMD\Module.SnapdragonVRHMD.cpp.obj"
+"F:\UnrealObject\SkyWorthXR_Demo\Plugins\SnapdragonVR\SnapdragonVRHMD\Intermediate\Build\Win64\UE4Editor\Development\SnapdragonVRHMD\Module.SnapdragonVRHMD.gen.cpp.obj"
+"F:\UnrealObject\SkyWorthXR_Demo\Plugins\SnapdragonVR\SnapdragonVRHMD\Intermediate\Build\Win64\UE4Editor\Development\SnapdragonVRHMD\Default.rc2.res"
+/OUT:"F:\UnrealObject\SkyWorthXR_Demo\Plugins\SnapdragonVR\SnapdragonVRHMD\Intermediate\Build\Win64\UE4Editor\Development\SnapdragonVRHMD\UE4Editor-SnapdragonVRHMD.lib"
+/INCLUDE:IMPLEMENT_MODULE_SnapdragonVRHMD
