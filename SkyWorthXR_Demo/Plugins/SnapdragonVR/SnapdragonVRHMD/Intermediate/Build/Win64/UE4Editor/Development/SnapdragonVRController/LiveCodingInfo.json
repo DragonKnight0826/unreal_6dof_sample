@@ -1,0 +1,15 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.SnapdragonVRController.cpp.obj": [
+			"SnapdragonVRController.cpp.obj",
+			"SnapdragonVRControllerEventManager.cpp.obj",
+			"SnapdragonVRControllerFunctionLibrary.cpp.obj"
+		],
+		"Module.SnapdragonVRController.gen.cpp.obj": [
+			"SnapdragonVRController.init.gen.cpp.obj",
+			"SnapdragonVRControllerEventManager.gen.cpp.obj",
+			"SnapdragonVRControllerFunctionLibrary.gen.cpp.obj"
+		]
+	}
+}
