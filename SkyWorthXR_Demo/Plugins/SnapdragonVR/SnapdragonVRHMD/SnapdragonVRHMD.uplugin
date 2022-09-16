@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 1,
-	"VersionName": "1.0",
+	"Version": 2,
+	"VersionName": "1.1.0",
 	"FriendlyName": "Skyworth XR",
 	"Description": "Add support for the Skyworth XR Head Mounted Display",
 	"Category": "Virtual Reality",
@@ -13,10 +13,10 @@
 	"EnabledByDefault": true,
 	"CanContainContent": true,
 	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
 	"Installed": false,
 	"SupportedTargetPlatforms": [
 		"Win64",
-		"Win32",
 		"Android"
 	],
 	"Modules": [
@@ -26,7 +26,6 @@
 			"LoadingPhase": "PostConfigInit",
 			"WhitelistPlatforms": [
 				"Win64",
-				"Win32",
 				"Android"
 			]
 		},
@@ -36,9 +35,14 @@
 			"LoadingPhase": "PreDefault",
 			"WhitelistPlatforms": [
 				"Win64",
-				"Win32",
 				"Android"
 			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "ProceduralMeshComponent",
+			"Enabled": true
 		}
 	]
 }

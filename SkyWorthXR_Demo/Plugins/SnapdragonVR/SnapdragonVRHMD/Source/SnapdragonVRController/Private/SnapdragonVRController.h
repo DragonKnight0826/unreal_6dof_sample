@@ -510,6 +510,10 @@ private:
 
 	void ReadControllerConfigStruct(uint32_t i, EControllerHand Hand);
 
+	/** Left Hand ResetOrientationAndPosition Start Time */
+	float ResetStartTimeL;
+	/** Right Hand ResetOrientationAndPosition Start Time */
+	float ResetStartTimeR;
 
 	/** Mapping of controller buttons and touch */
 	FSkyWorthXRKeyNames::Type Buttons[CONTROLLERS_PER_PLAYER][ESnapdragonVRControllerButton::TotalCount];

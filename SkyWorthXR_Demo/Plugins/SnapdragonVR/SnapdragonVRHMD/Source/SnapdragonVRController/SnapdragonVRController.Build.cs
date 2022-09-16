@@ -16,15 +16,6 @@ namespace UnrealBuildTool.Rules
 			// Assume that the SVR stuff is located relative to ..\MyProjectRoot\Plugins\SnapdragonVR/XR
 			// and that the SnapdragonVRLib code is co-located next to the this module's dir
 			// ..\MyProjectRoot\Plugins\SnapdragonVR\SnapdragopnXRLib\Include
-			SnapdragonSDKHeaderDirectory = System.IO.Path.Combine(SnapdragonSDKHeaderDirectory, @"..\..\..\SnapdragonXRLib");
-			SnapdragonSDKHeaderDirectory = System.IO.Path.GetFullPath(SnapdragonSDKHeaderDirectory);
-
-			PrivateIncludePaths.AddRange(
-				new string[]{
-				SnapdragonSDKHeaderDirectory
-				// ... add other private include paths required here ...
-				}
-			);
 
 			//System.Console.WriteLine(">>>>>>>>>>>>>>>>>>>>>>>>>>SnapdragonSDKHeaderDirectory->" + SnapdragonSDKHeaderDirectory);
 

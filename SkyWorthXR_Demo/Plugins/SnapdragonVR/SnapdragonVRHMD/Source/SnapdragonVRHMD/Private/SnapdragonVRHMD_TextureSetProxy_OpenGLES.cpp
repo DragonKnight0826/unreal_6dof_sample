@@ -6,7 +6,7 @@
 //
 //=============================================================================
 #include "SnapdragonVRHMD_TextureSetProxy.h"
-
+#include "RHI/Public/RHIDefinitions.h"
 #include "OpenGLDrv/Private/OpenGLDrvPrivate.h"
 #include "OpenGLDrv/Public/OpenGLResources.h"
 #include "SnapdragonXR_CVars.h"
@@ -68,12 +68,16 @@ FSnapdragonVRTextureSet_OpenGL::FSnapdragonVRTextureSet_OpenGL(
 	false,
 	true,
 	InFlags,
-	//nullptr,
+
+#if ENGINE_MINOR_VERSION < 26 && ENGINE_MAJOR_VERSION < 5
+	nullptr,
+#endif
+
 	FClearValueBinding::White)
 {
 	check(InArraySize == 1 || InTarget == GL_TEXTURE_2D_ARRAY);
 
-	//ÎªÁË½â¾öÎö¹¹Ê±GetMemorySize¶ÏÑÔ±ÀÀ£ÎÊÌâ£¬ÔÝÊ±²»Çå³þÊÇ·ñÓÐÒþ»¼
+	//ä¸ºäº†è§£å†³æžæž„æ—¶GetMemorySizeæ–­è¨€å´©æºƒé—®é¢˜ï¼Œæš‚æ—¶ä¸æ¸…æ¥šæ˜¯å¦æœ‰éšæ‚£
 	//((FOpenGLTextureCube*)this->GetTextureCube())->SetMemorySize(1);
 
 	// rbf debug
@@ -83,10 +87,14 @@ FSnapdragonVRTextureSet_OpenGL::FSnapdragonVRTextureSet_OpenGL(
 	for (int i = 0; i < CVars::GNumSwapchainImages; ++i)
 	{
 		bool bArrayTexture = (InArraySize > 1);
-
+#if ENGINE_MINOR_VERSION < 25 && ENGINE_MAJOR_VERSION < 5
+		bool bNoSRGBSupport = (GMaxRHIFeatureLevel == ERHIFeatureLevel::ES2);
+#else
 		bool bNoSRGBSupport = (GMaxRHIFeatureLevel == ERHIFeatureLevel::ES2_REMOVED);
+#endif
+		
 
-		if ((InTargetableTextureFlags & TexCreate_RenderTargetable) && InFormat == PF_B8G8R8A8 && !FOpenGL::SupportsBGRA8888())
+		if (((int32)InTargetableTextureFlags & (int32)TexCreate_RenderTargetable) && InFormat == PF_B8G8R8A8 && !FOpenGL::SupportsBGRA8888())
 		{
 			// Some android devices does not support BGRA as a color attachment
 			InFormat = PF_R8G8B8A8;
@@ -95,7 +103,7 @@ FSnapdragonVRTextureSet_OpenGL::FSnapdragonVRTextureSet_OpenGL(
 		if (bNoSRGBSupport)
 		{
 			// Remove sRGB read flag when not supported
-			InTargetableTextureFlags &= ~TexCreate_SRGB;
+			InTargetableTextureFlags = ETextureCreateFlags(InTargetableTextureFlags & ~TexCreate_SRGB);
 		}
 
 		GLuint TextureID = 0;
@@ -105,7 +113,7 @@ FSnapdragonVRTextureSet_OpenGL::FSnapdragonVRTextureSet_OpenGL(
 		dbgprint("FSnapdragonVRTextureSet_OpenGL c'tor - creating texture ID %d, Size %d,%d format - %d",
 			TextureID, InSizeX, InSizeY, (uint)InFormat);
 
-		const bool bSRGB = (InTargetableTextureFlags & TexCreate_SRGB) != 0;
+		const bool bSRGB = ((int32)InTargetableTextureFlags & (int32)TexCreate_SRGB) != 0;
 		const FOpenGLTextureFormat& GLFormat = GOpenGLTextureFormats[InFormat];
 		if (GLFormat.InternalFormat[bSRGB] == GL_NONE)
 		{
@@ -208,7 +216,10 @@ FSnapdragonVRTextureSet_OpenGL::FSnapdragonVRTextureSet_OpenGL(
 				false, // cubemaps?
 				true,  // in allocated storage?
 				InTargetableTextureFlags,
-				//nullptr, // texture range
+
+#if ENGINE_MINOR_VERSION < 26 && ENGINE_MAJOR_VERSION < 5
+				nullptr, // texture range
+#endif	
 				FClearValueBinding(Color)
 			);
 
@@ -232,7 +243,10 @@ FSnapdragonVRTextureSet_OpenGL::FSnapdragonVRTextureSet_OpenGL(
 				false,
 				true,
 				InTargetableTextureFlags,
-				//nullptr,
+
+#if ENGINE_MINOR_VERSION < 26 && ENGINE_MAJOR_VERSION < 5
+				nullptr, // texture range
+#endif
 				FClearValueBinding(Color)
 			);
 
@@ -285,7 +299,12 @@ FSnapdragonVRTextureSet_OpenGL::FSnapdragonVRTextureSet_OpenGL(
 
 void FSnapdragonVRTextureSet_OpenGL::SetNativeResource(const FTextureRHIRef& RenderTargetTexture)
 {
+#if ENGINE_MINOR_VERSION < 27 && ENGINE_MAJOR_VERSION < 5
 	Resource = *(GLuint*)RenderTargetTexture->GetNativeResource();
+#else
+	SetResource(*(GLuint*)RenderTargetTexture->GetNativeResource());
+#endif
+	
 }
 
 FSnapdragonVRTextureSet_OpenGL* CreateTextureSetProxy_OpenGLES(

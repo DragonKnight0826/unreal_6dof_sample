@@ -9,6 +9,8 @@
 #include "SnapdragonVRHMDModule.h"
 #include "SnapdragonVRHMD.h"
 
+IMPLEMENT_MODULE(FSnapdragonVRHMDModule, SnapdragonVRHMD)
+
 const FString FSnapdragonVRHMDModule::SnapdragonVRHMDModuleString(TEXT("SnapdragonVR")); // an FString is a regular string array
 const FName   ISnapdragonVRHMDModule::SnapdragonVRHMDModuleName(TEXT("SnapdragonVR")); // an FName is case insensitive
 
@@ -21,8 +23,10 @@ FSnapdragonVRHMDModule::FSnapdragonVRHMDModule()
 FSnapdragonVRHMDModule::~FSnapdragonVRHMDModule()
 {
 }
+
 TSharedPtr< class IXRTrackingSystem, ESPMode::ThreadSafe > FSnapdragonVRHMDModule::CreateTrackingSystem()
 {
+
 #if SNAPDRAGONVR_HMD_SUPPORTED_PLATFORMS
 	TSharedRef< FSnapdragonVRHMD, ESPMode::ThreadSafe > HMD = FSceneViewExtensions::NewExtension<FSnapdragonVRHMD>();
 	if (HMD->IsInitialized())
@@ -31,12 +35,13 @@ TSharedPtr< class IXRTrackingSystem, ESPMode::ThreadSafe > FSnapdragonVRHMDModul
 
 		return HMD;
 	}
-
-	UE_LOG(LogSVR, Log, TEXT("SnapdragonVR->IsInitialized() == Failed"));
 	// 		SnapdragonVRHMD.Reset();//failed to initialize; free useless instance of SnapdragonVR
-#endif
+	UE_LOG(LogSVR, Error, TEXT("SnapdragonVR->IsInitialized() == Failed"));
 
+#endif
+	
 	return nullptr;
+
 }
 
 
@@ -85,4 +90,3 @@ void FSnapdragonVRHMDModule::ShutdownModule()
 {
 	IHeadMountedDisplayModule::ShutdownModule();
 }
-IMPLEMENT_MODULE(FSnapdragonVRHMDModule, SnapdragonVRHMD)

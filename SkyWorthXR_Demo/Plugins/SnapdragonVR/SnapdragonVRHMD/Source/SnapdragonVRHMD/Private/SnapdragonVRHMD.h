@@ -34,7 +34,7 @@ struct FFrameSensorState
 };
 
 //-----------------------------------------------------------------------------
-class FSnapdragonVRHMD : public FHeadMountedDisplayBase, public FXRRenderTargetManager, public FSceneViewExtensionBase, public IStereoLayers
+class FSnapdragonVRHMD : public FHeadMountedDisplayBase, public FXRRenderTargetManager, public FSceneViewExtensionBase, public IStereoLayers, public IXRInput
 {
 public:
 	//friend class FSceneViewExtensions;
@@ -59,7 +59,7 @@ public:
 	{
 		return SnapdragonVRHMDSystemName;
 	}
-#if ENGINE_MINOR_VERSION >25
+#if ENGINE_MINOR_VERSION >25 || ENGINE_MAJOR_VERSION == 5
 	virtual int32 GetXRSystemFlags() const override;
 #endif
 	/** @return	True if the HMD was initialized OK */
@@ -80,7 +80,14 @@ public:
 	virtual void ResetPosition() override;
 
 	void SetCPUAndGPULevels(const int32 InCPULevel, const int32 InGPULevel) const;
+#if ENGINE_MAJOR_VERSION == 5
+	virtual bool HasHiddenAreaMesh() const override { return HiddenAreaMeshes[0].IsValid() && HiddenAreaMeshes[1].IsValid(); }
+	virtual void DrawHiddenAreaMesh(class FRHICommandList& RHICmdList, int32 ViewIndex) const override;
+	virtual bool HasVisibleAreaMesh() const override { return false; }
+	virtual void DrawVisibleAreaMesh(class FRHICommandList& RHICmdList, int32 ViewIndex) const override;
 
+	virtual void DrawDistortionMesh_RenderThread(struct FHeadMountedDisplayPassContext& Context, const FIntPoint& TextureSize) override;
+#else
 	virtual bool HasHiddenAreaMesh() const override { return HiddenAreaMeshes[0].IsValid() && HiddenAreaMeshes[1].IsValid(); }
 	virtual void DrawHiddenAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const override;
 
@@ -88,7 +95,7 @@ public:
 	virtual void DrawVisibleAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const override;
 
 	virtual void DrawDistortionMesh_RenderThread(struct FRenderingCompositePassContext& Context, const FIntPoint& TextureSize) override;
-
+#endif
 	virtual void UpdateScreenSettings(const FViewport* InViewport) override {}
 
 
@@ -110,7 +117,13 @@ public:
 	//virtual bool IsActiveThisFrame(class FViewport* InViewport) const override { return false;  }  // RBF questionable
 	virtual void PostRenderViewFamily_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneViewFamily& InViewFamily) override;
 	virtual void PostRenderView_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneView& InView) override {}
+
+#if ENGINE_MINOR_VERSION < 27 && ENGINE_MAJOR_VERSION < 5
 	virtual bool IsActiveThisFrame(class FViewport* InViewport) const override;
+#else
+	virtual bool IsActiveThisFrame_Internal(const FSceneViewExtensionContext& Context) const override;
+#endif
+	
 
 	///////////////////////////////////////////////////
 	// Begin IStereoRendering Pure-Virtual Interface //
@@ -130,12 +143,20 @@ public:
 	/**
 	* Adjusts the viewport rectangle for stereo, based on which eye pass is being rendered.
 	*/
+#if ENGINE_MAJOR_VERSION == 5
+	virtual void AdjustViewRect(int32 ViewIndex, int32& X, int32& Y, uint32& SizeX, uint32& SizeY) const override;
+#else
 	virtual void AdjustViewRect(EStereoscopicPass StereoPass, int32& X, int32& Y, uint32& SizeX, uint32& SizeY) const override;
+#endif
 
 	/**
 	* Gets a projection matrix for the device, given the specified eye setup
 	*/
+#if ENGINE_MAJOR_VERSION == 5
+	virtual FMatrix GetStereoProjectionMatrix(const int32 ViewIndex) const override;
+#else
 	virtual FMatrix GetStereoProjectionMatrix(const EStereoscopicPass StereoPassType) const override;
+#endif
 
 	virtual FIntPoint GetIdealRenderTargetSize() const override;
 	// virtual void SetFinalViewRect(const enum EStereoscopicPass StereoPass, const FIntRect& FinalViewRect) override;
@@ -147,7 +168,11 @@ public:
 	/**
 	* Returns eye render params, used from PostProcessHMD, RenderThread.
 	*/
+#if ENGINE_MAJOR_VERSION == 5
+	virtual void GetEyeRenderParams_RenderThread(const struct FHeadMountedDisplayPassContext& Context, FVector2D& EyeToSrcUVScaleValue, FVector2D& EyeToSrcUVOffsetValue) const override;
+#else
 	virtual void GetEyeRenderParams_RenderThread(const struct FRenderingCompositePassContext& Context, FVector2D& EyeToSrcUVScaleValue, FVector2D& EyeToSrcUVOffsetValue) const override;
+#endif
 
 	// Renders texture into a backbuffer. Could be empty if no rendertarget texture is used, or if direct-rendering
 	// through RHI bridge is implemented.
@@ -167,7 +192,7 @@ public:
 
 	// Whether separate render target should be used or not.
 	virtual bool ShouldUseSeparateRenderTarget() const override { return IsStereoEnabled(); }
-	#if ENGINE_MINOR_VERSION >25
+#if ENGINE_MINOR_VERSION >25 || ENGINE_MAJOR_VERSION == 5
 	virtual bool AllocateRenderTargetTexture(uint32 Index, uint32 SizeX, uint32 SizeY, uint8 Format, uint32 NumMips, ETextureCreateFlags InTexFlags, ETextureCreateFlags InTargetableTextureFlags, FTexture2DRHIRef& OutTargetableTexture, FTexture2DRHIRef& OutShaderResourceTexture, uint32 NumSamples = 1) override;
 #else
 	virtual bool AllocateRenderTargetTexture(uint32 Index, uint32 SizeX, uint32 SizeY, uint8 Format, uint32 NumMips, uint32 Flags, uint32 TargetableTextureFlags, FTexture2DRHIRef& OutTargetableTexture, FTexture2DRHIRef& OutShaderResourceTexture, uint32 NumSamples = 1) override;
@@ -241,7 +266,11 @@ public:
 	* @param OutPosition The position of the eye relative to the tracked device
 	* @return true if the pose is valid or not. If the device is not a stereoscopic device, return false.
 	*/
+#if ENGINE_MAJOR_VERSION == 5
+	virtual bool GetRelativeEyePose(int32 DeviceId, int32 ViewIndex, FQuat& OutOrientation, FVector& OutPosition) override;
+#else
 	virtual bool GetRelativeEyePose(int32 DeviceId, EStereoscopicPass Eye, FQuat& OutOrientation, FVector& OutPosition) override;
+#endif
 
 	/**
 	* Resets orientation by setting roll and pitch to 0, assuming that current yaw is forward direction and assuming
@@ -270,6 +299,13 @@ public:
 	* @param BaseRot			(in) the desired orientation to be treated as a base orientation.
 	*/
 	virtual void SetBaseRotation(const FRotator& BaseRot) override;
+
+	/**
+	* Passing key events to HMD.
+	* If returns 'false' then key will be handled by PlayerController;
+	* otherwise, key won't be handled by the PlayerController.
+	*/
+	virtual bool HandleInputKey(class UPlayerInput*, const struct FKey& Key, EInputEvent EventType, float AmountDepressed, bool bGamepad) override;
 
 	/**
 	* Returns current base orientation of HMD as yaw-pitch-roll combination.
@@ -422,6 +458,10 @@ public:
 	/** FXRTrackingSystemBase protected interface */
 	virtual float GetWorldToMetersScale() const override;
 
+#if ENGINE_MINOR_VERSION > 26 || ENGINE_MAJOR_VERSION == 5
+	bool IsStandaloneStereoOnlyDevice() const { return bIsStandaloneStereoOnlyDevice; }
+#endif
+
 	#if SNAPDRAGONVR_HMD_SUPPORTED_PLATFORMS
 	// Performance helper functions
 	static void PerfLevelLog(const TCHAR* const InPrefix, enum GSXRPerfLevel InPerfLevelCpu, enum GSXRPerfLevel InPerfLevelGpu);
@@ -486,31 +526,49 @@ private:
 	//  Converts vector from Unreal space to SXR 
 	FORCEINLINE GSXRVector3 Unreal2SXR_Vector(const FVector& InVec)
 	{
-		return GSXRVector3{ InVec.Y, InVec.Z, -InVec.X };
+		return GSXRVector3{ (float)InVec.Y, (float)InVec.Z, (float)-InVec.X };
 	}
 
 	// which view array index is this pass for?
 	FORCEINLINE int32 ViewIndexFromStereoPass(const EStereoscopicPass StereoPassType) const
 	{
+#if ENGINE_MAJOR_VERSION == 5
 		switch (StereoPassType)
 			{
-				case eSSP_LEFT_EYE:
-				case eSSP_FULL:
+		case EStereoscopicPass::eSSP_PRIMARY:
+				case EStereoscopicPass::eSSP_FULL:
 					return 0;
 
-				case eSSP_RIGHT_EYE:
+				case EStereoscopicPass::eSSP_SECONDARY:
 					return 1;
 
 				default:
 					check(0);
 					return -1;
+#else
+		switch (StereoPassType)
+		{
+		case eSSP_LEFT_EYE:
+		case eSSP_FULL:
+			return 0;
+
+		case eSSP_RIGHT_EYE:
+			return 1;
+
+		default:
+			check(0);
+			return -1;
+#endif
 		}
 	}
 
 private:
 	bool bInitialized;
 	bool bResumed;
-
+#if ENGINE_MINOR_VERSION > 26 || ENGINE_MAJOR_VERSION == 5
+	bool bIsStandaloneStereoOnlyDevice;
+#endif
+	
 // #if SNAPDRAGONVR_HMD_SUPPORTED_PLATFORMS
 // 	TRefCountPtr<FSnapdragonVRHMDCustomPresent> pSnapdragonVRBridge;
 // #else
@@ -576,27 +634,3 @@ public:
 // #else
 // #define TM_MSG(...)
 // #endif
-
-bool InGameThread()
-{
-	if (GIsGameThreadIdInitialized)
-	{
-		return FPlatformTLS::GetCurrentThreadId() == GGameThreadId;
-	}
-	else
-	{
-		return true;
-	}
-}
-
-bool InRenderThread()
-{
-	if (GIsThreadedRendering && !GIsRenderingThreadSuspended.Load(EMemoryOrder::Relaxed))
-	{
-		return IsInActualRenderingThread();
-	}
-	else
-	{
-		return InGameThread();
-	}
-}
