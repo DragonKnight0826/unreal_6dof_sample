@@ -20,7 +20,7 @@ void FGSXRSwapChain::ReleaseResources_RHIThread()
 {
 }
 
-#if ENGINE_MINOR_VERSION>25
+#if ENGINE_MINOR_VERSION>25 || ENGINE_MAJOR_VERSION == 5
 FXRSwapChainPtr CreateSwapChain_OpenGL(uint8 Format, uint32 SizeX, uint32 SizeY, uint32 ArraySize, uint32 NumMips, uint32 NumSamples, ETextureCreateFlags Flags, ETextureCreateFlags TargetableTextureFlags,uint32 MSAAValue,TArray<uint32> TexutreResources)
 #else
 FXRSwapChainPtr CreateSwapChain_OpenGL(uint8 Format, uint32 SizeX, uint32 SizeY, uint32 ArraySize, uint32 NumMips, uint32 NumSamples, uint32 Flags, uint32 TargetableTextureFlags,uint32 MSAAValue,TArray<uint32> TexutreResources)

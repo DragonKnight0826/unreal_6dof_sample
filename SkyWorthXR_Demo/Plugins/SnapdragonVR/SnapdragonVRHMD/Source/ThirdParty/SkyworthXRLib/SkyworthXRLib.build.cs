@@ -15,8 +15,17 @@ public class SkyworthXRLib : ModuleRules
 
         if (Target.Platform == UnrealTargetPlatform.Android)
         {
-            PublicAdditionalLibraries.Add(SourceDirectory + "Lib/armeabi-v7a/" + "libgsxr_fe.so");
+
+
+            PrivateDependencyModuleNames.AddRange(
+               new string[] 
+               { 
+                   "Launch" 
+               }
+               );
+
             PublicAdditionalLibraries.Add(SourceDirectory + "Lib/arm64-v8a/" + "libgsxr_fe.so");
+            PublicAdditionalLibraries.Add(SourceDirectory + "Lib/armeabi-v7a/" + "libgsxr_fe.so");
 
             AdditionalPropertiesForReceipt.Add("AndroidPlugin", Path.Combine(ModuleDirectory, "SkyworthXRLib_APL.xml"));
         }
