@@ -83,8 +83,11 @@ void USnapdragonVRHMDFunctionLibrary::GetEyeOrientationAndPosition(FVector& OutP
 	}
 
 	// doesn't care about eye parameter....
-	Success =  HMD->GetRelativeEyePose(HMD->HMDDeviceId, EStereoscopicPass::eSSP_LEFT_EYE, OutOrientation, OutPosition);
-
+#if ENGINE_MAJOR_VERSION == 5
+	Success =  HMD->GetRelativeEyePose(HMD->HMDDeviceId, EStereoscopicEye::eSSE_LEFT_EYE, OutOrientation, OutPosition);
+#else
+	Success = HMD->GetRelativeEyePose(HMD->HMDDeviceId, EStereoscopicPass::eSSP_LEFT_EYE, OutOrientation, OutPosition);
+#endif
 	FQuat HMD_Orientation;
 	FVector HMD_Position;
 

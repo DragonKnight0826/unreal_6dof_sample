@@ -14,11 +14,6 @@
     </isArch>
   </init>
 
-	<!-- optional updates applied to AndroidManifest.xml -->
-	<androidManifestUpdates>
-        <addPermission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-	</androidManifestUpdates>
-
 	<!-- optional additions to proguard -->
 	<proguardAdditions>
 	</proguardAdditions>
@@ -76,12 +71,4 @@
 	-->
 
 	<!-- optional libraries to load in GameActivity.java before libUE4.so -->
-	<soLoadLibrary>
-		<!-- need this if plugin enabled and supported architecture, even if not packaged for SnapdragonVR -->
-		<if condition="bSupported">
-			<true>
-				<loadLibrary name="sxrapi" failmsg="SnapdragonXR library not loaded and required!" />
-			</true>
-		</if>
-	</soLoadLibrary>
 </root>

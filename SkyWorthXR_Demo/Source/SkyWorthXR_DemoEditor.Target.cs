@@ -10,6 +10,11 @@ public class SkyWorthXR_DemoEditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.V2;
 
+		if (Configuration == UnrealTargetConfiguration.Shipping)
+		{
+			bUseLoggingInShipping = true;
+		}
+
 		ExtraModuleNames.AddRange( new string[] { "SkyWorthXR_Demo" } );
 	}
 }

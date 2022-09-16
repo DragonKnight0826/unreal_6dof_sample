@@ -10,6 +10,13 @@ public class SkyWorthXR_DemoTarget : TargetRules
 		Type = TargetType.Game;
 		DefaultBuildSettings = BuildSettingsVersion.V2;
 
+		// enable logs and debugging for Shipping builds
+		if (Configuration == UnrealTargetConfiguration.Shipping)
+		{
+            BuildEnvironment = TargetBuildEnvironment.Unique;
+            bUseLoggingInShipping = true;
+        }
+
 		ExtraModuleNames.AddRange( new string[] { "SkyWorthXR_Demo" } );
 	}
 }

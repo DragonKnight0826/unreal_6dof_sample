@@ -143,7 +143,7 @@ namespace UnrealBuildTool.Rules
                     "CoreUObject",
                     "Engine",
                     "RHI",
-                    "RenderCore",
+					"RenderCore",
                     "Renderer",
                     "HeadMountedDisplay",
                     "Slate",
@@ -151,8 +151,7 @@ namespace UnrealBuildTool.Rules
                     "OpenGLDrv",
                     "OpenGL",
                     "VulkanRHI",
-					"SkyworthXRLib",
-                    "ProceduralMeshComponent"
+					"SkyworthXRLib"
                 }
                 );
 
@@ -180,7 +179,7 @@ namespace UnrealBuildTool.Rules
             }
 
             // deleted "svrApi" module and removed references to it - we just link in the Android library directly
-            if (Target.Platform == UnrealTargetPlatform.Win32 || Target.Platform == UnrealTargetPlatform.Win64)
+            if (Target.Platform == UnrealTargetPlatform.Win64)
             {
                 PrivateIncludePaths.Add(EngineRuntimePath + @"\VulkanRHI\Private\Windows");
                 AddEngineThirdPartyPrivateStaticDependencies(Target, "Vulkan");
