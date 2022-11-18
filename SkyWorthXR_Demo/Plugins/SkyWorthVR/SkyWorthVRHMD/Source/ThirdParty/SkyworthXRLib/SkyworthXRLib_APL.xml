@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- GoogleVRHMD plugin additions -->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<!-- init section is always evaluated once per architecture -->
+	<init>
+		<log text="SkyworthXRLib init" />
+	</init>
+
+	<!-- optional updates applied to AndroidManifest.xml -->
+	<androidManifestUpdates>
+		<addPermission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+		<loopElements tag="application">
+			<addElements tag="application">
+				<meta-data android:name="invision.display_mode" android:value="vr" />
+			</addElements>
+		</loopElements>
+	</androidManifestUpdates>
+	
+	<!-- optional files or directories to copy to Intermediate/Android/APK -->
+	<!-- optional files or directories to copy to Intermediate/Android/APK -->
+	<resourceCopies>
+        <isArch arch="armeabi-v7a">
+			<log text="Copying 32bit libXRLoader.so" />
+			<copyFile src="$S(PluginDir)/SkyworthXRLib/Lib/ARM/Release/libXRLoader.so" dst="$S(BuildDir)/libs/armeabi-v7a/libXRLoader.so" />
+			<log text="Copying 32bit libXRLoader.so" />
+			<copyFile src="$S(PluginDir)/SkyworthXRLib/Lib/ARM/Release/libXRLoader_GSXRTerminator.so" dst="$S(BuildDir)/libs/armeabi-v7a/libXRLoader_GSXRTerminator2.so" />
+			<log text="Copying 32bit libgsxr_fe.so" />
+			<copyFile src="$S(PluginDir)/SkyworthXRLib/Lib/ARM/Release/libgsxr_fe.so" dst="$S(BuildDir)/libs/armeabi-v7a/libgsxr114.so" />
+		</isArch>
+		<isArch arch="arm64-v8a">
+			<log text="Copying 64bit libXRLoader.so" />
+			<copyFile src="$S(PluginDir)/SkyworthXRLib/Lib/ARM64/Release/libXRLoader.so" dst="$S(BuildDir)/libs/arm64-v8a/libXRLoader.so" />
+			<log text="Copying 32bit libXRLoader.so" />
+			<copyFile src="$S(PluginDir)/SkyworthXRLib/Lib/ARM64/Release/libXRLoader_GSXRTerminator.so" dst="$S(BuildDir)/libs/arm64-v8a/libXRLoader_GSXRTerminator2.so" />
+			<log text="Copying 32bit libgsxr_fe.so" />
+			<copyFile src="$S(PluginDir)/SkyworthXRLib/Lib/ARM64/Release/libgsxr_fe.so" dst="$S(BuildDir)/libs/arm64-v8a/libgsxr114.so" />
+        </isArch>
+    </resourceCopies>
+
+	<buildGradleAdditions>
+		<insert>
+			android
+			{
+				repositories
+				{
+					flatDir{dirs 'src/main/libs/'}
+				}
+			}
+		</insert>
+	</buildGradleAdditions>
+</root>

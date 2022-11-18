@@ -12,6 +12,10 @@
 	],
 	"Plugins": [
 		{
+			"Name": "RenderDocPlugin",
+			"Enabled": true
+		},
+		{
 			"Name": "OculusVR",
 			"Enabled": false,
 			"SupportedTargetPlatforms": [
@@ -31,7 +35,6 @@
 		}
 	],
 	"TargetPlatforms": [
-		"PS4",
 		"Android"
 	]
 }

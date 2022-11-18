@@ -1,8 +1,0 @@
-{
-	"BuildId": "14830424",
-	"Modules": 
-	{
-		"SnapdragonVRController": "UE4Editor-SnapdragonVRController.dll",
-		"SnapdragonVRHMD": "UE4Editor-SnapdragonVRHMD.dll"
-	}
-}

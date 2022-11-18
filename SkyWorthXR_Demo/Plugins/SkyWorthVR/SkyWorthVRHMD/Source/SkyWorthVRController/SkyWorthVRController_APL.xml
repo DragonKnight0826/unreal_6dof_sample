@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--SkyWorthVR plugin additions-->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<!-- init section is always evaluated once per architecture -->
+	<init>
+		<log text="SkyWorthVRController init"/>
+		<!-- currently only support armv7 -->
+		<setBool result="bSupported" value="false"/>
+		<isArch arch="armeabi-v7a">
+			<setBool result="bSupported" value="true"/>
+		</isArch>
+    <isArch arch="arm64-v8a">
+      <setBool result="bSupported" value="true"/>
+    </isArch>
+  </init>
+
+	<!-- optional additions to proguard -->
+	<proguardAdditions>
+	</proguardAdditions>
+
+	<!-- optional files or directories to copy to Intermediate/Android/APK -->
+	<resourceCopies>
+	</resourceCopies>
+
+	<!-- optional additions to the GameActivity imports in GameActivity.java
+	-->
+		<gameActivityClassAdditions>
+		<insert>
+			public boolean AndroidKeyEnter=false;
+
+			public boolean AndroidThunkJava_GetEnterKey() {
+
+			return AndroidKeyEnter;
+			}
+
+
+			public void AndroidThunkJava_SetKeyListener()
+			{
+			System.out.println(" AndroidThunkJava_SetKeyListener");
+			View mainRootView = mainDecorView.findViewById(android.R.id.content).getRootView();
+			mainView.setOnKeyListener(new View.OnKeyListener() {
+			public boolean onKey(View v, int keyCode, KeyEvent event) {
+			System.out.println(" KEYCODE--KEYCODE_DPAD_CENTER=" +  keyCode);
+			if(keyCode==KeyEvent.KEYCODE_DPAD_CENTER)
+			{
+			if(event.getAction()==KeyEvent.ACTION_UP)
+			{
+			AndroidKeyEnter=false;
+			System.out.println(" AndroidKeyEnter1");
+			}
+			if(event.getAction()==KeyEvent.ACTION_DOWN)
+			{
+			AndroidKeyEnter=true;
+			System.out.println(" AndroidKeyEnter2");
+			}
+			}
+			return false;
+			}
+			});
+			}
+
+
+			public boolean AndroidKeyRecenter = false;
+			public class RecenterBroadcastRecenter extends BroadcastReceiver {
+			//接收到广播后，则自动调用该方法
+			@Override
+			public void onReceive(Context context, Intent intent) {
+			String action = intent.getAction();
+			if(action == RecenterReceiverStr)
+			{
+			System.out.println(" KEYCODE--AndroidKeyRecenter" );
+			AndroidKeyRecenter = true;
+			}
+			}
+			}
+
+			public void AndroidThunkJava_ResetReceiverState()
+			{
+			AndroidKeyRecenter = false;
+			}
+			public boolean AndroidThunkJava_GetReceiverState()
+			{
+			return AndroidKeyRecenter;
+			}
+
+			public String RecenterReceiverStr = "com.ssnwt.action.RECENTER";
+			public void AndroidThunkJava_SetRecenterReceiverStr(String str)
+			{
+				System.out.println("AndroidThunkJava_SetRecenterReceiverReceiverStr:" + str);
+				RecenterReceiverStr = str;
+			}
+
+
+			public void AndroidThunkJava_SetRecenterBroadcastRecenter()
+			{
+			//1.实例化MyBroadcaseReceiver
+			RecenterBroadcastRecenter recenterBroadcaseReceiver = new RecenterBroadcastRecenter();
+			//2.设置广播类型
+			IntentFilter intentFilter = new IntentFilter();
+			intentFilter.addAction(RecenterReceiverStr);
+			//3.动态注册广播
+			registerReceiver(recenterBroadcaseReceiver, intentFilter);
+			}
+		</insert>
+	</gameActivityClassAdditions>
+
+	<!-- optional additions to the GameActivity class in GameActivity.java -->
+
+
+	<!-- optional additions to GameActivity onCreate metadata reading in GameActivity.java
+	<gameActivityReadMetadataAdditions>
+	</gameActivityReadMetadataAdditions>
+    -->
+
+	<!-- optional additions to GameActivity onCreate in GameActivity.java
+	<gameActivityOnCreateAdditions>
+	</gameActivityOnCreateAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onDestroy in GameActivity.java
+	<gameActivityOnDestroyAdditions>
+	</gameActivityOnDestroyAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onStart in GameActivity.java
+	<gameActivityOnStartAdditions>
+	</gameActivityOnStartAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onStop in GameActivity.java
+	<gameActivityOnStopAdditions>
+	</gameActivityOnStopAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onPause in GameActivity.java
+	<gameActivityOnPauseAdditions>
+	</gameActivityOnPauseAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onResume in GameActivity.java
+	<gameActivityOnResumeAdditions>
+	</gameActivityOnResumeAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onActivityResult in GameActivity.java
+	<gameActivityOnActivityResultAdditions>
+	</gameActivityOnActivityResultAdditions>
+	-->
+
+	<!-- optional libraries to load in GameActivity.java before libUE4.so -->
+</root>

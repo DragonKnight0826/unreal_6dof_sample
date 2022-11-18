@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<project>
+  <SOLibPaths>D:\Document\UnrealProject\SkyworthXR.Sample\SkyWorthXR_Demo\Plugins\SXRLoader\XRLoader_Trampoline\ARM\Release\libXRLoader.so;C:\Users\dell\AppData\Local\Android\SDK\ndk\21.4.7075529\prebuilt\android-arm\gdbserver\gdbserver;C:\Users\dell\AppData\Local\Android\SDK\ndk\21.4.7075529\sources\cxx-stl\llvm-libc++\libs\armeabi-v7a\libc++_static.a;C:\Users\dell\AppData\Local\Android\SDK\ndk\21.4.7075529\sources\cxx-stl\llvm-libc++\libs\armeabi-v7a\libc++abi.a</SOLibPaths>
+  <AndroidLibPaths />
+  <OObjPaths>D:\Document\UnrealProject\SkyworthXR.Sample\SkyWorthXR_Demo\Plugins\SXRLoader\XRLoader_Trampoline\XRLoader\ARM\Release</OObjPaths>
+  <Configuration>Release</Configuration>
+  <Platform>ARM</Platform>
+  <AndroidArchitecture>armeabi-v7a</AndroidArchitecture>
+  <!--links to other recipe files-->
+  <RecipeFiles />
+</project>
