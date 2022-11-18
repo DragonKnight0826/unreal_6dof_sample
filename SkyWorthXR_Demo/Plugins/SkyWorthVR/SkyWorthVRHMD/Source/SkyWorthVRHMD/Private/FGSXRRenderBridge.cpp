@@ -1,10 +1,10 @@
 #include "FGSXRRenderBridge.h"
-#include "SkyWorthVRHMD.h"
+#include "SnapdragonVRHMD.h"
 #include "FGSXRSwapChain.h"
 
-FGSXRRenderBridge::FGSXRRenderBridge(FSkyWorthVRHMD* HMD)
+FGSXRRenderBridge::FGSXRRenderBridge(FSnapdragonVRHMD* HMD)
 	:FXRRenderBridge()
-	,pSkyWorthVRHMD(HMD)
+	,pSnapdragonVRHMD(HMD)
 {
 }
 
@@ -21,15 +21,15 @@ bool FGSXRRenderBridge::Present(int32& InOutSyncInterval)
 {
 	bool bNeedsNativePresent = true;
 
-#if SkyWorthVR_HMD_SUPPORTED_PLATFORMS
-	if (pSkyWorthVRHMD)
+#if SNAPDRAGONVR_HMD_SUPPORTED_PLATFORMS
+	if (pSnapdragonVRHMD)
 	{
-		pSkyWorthVRHMD->EndFrame_RHIThread();
+		pSnapdragonVRHMD->EndFrame_RHIThread();
 
 #if ENGINE_MINOR_VERSION < 27 && ENGINE_MAJOR_VERSION < 5
 		bNeedsNativePresent = !FPlatformMisc::IsStandaloneStereoOnlyDevice();
 #else
-		bNeedsNativePresent = !pSkyWorthVRHMD->IsStandaloneStereoOnlyDevice();
+		bNeedsNativePresent = !pSnapdragonVRHMD->IsStandaloneStereoOnlyDevice();
 #endif
 		
 	}
@@ -43,7 +43,7 @@ bool FGSXRRenderBridge::Present(int32& InOutSyncInterval)
 class FGSXRRenderBridge_OpenGL : public FGSXRRenderBridge
 {
 public:
-	FGSXRRenderBridge_OpenGL(FSkyWorthVRHMD* HMD)
+	FGSXRRenderBridge_OpenGL(FSnapdragonVRHMD* HMD)
 		:FGSXRRenderBridge(HMD)
 	{
 		
@@ -59,7 +59,7 @@ public:
 	}
 };
 
-FGSXRRenderBridge* CreateRenderBridge_OpenGL(FSkyWorthVRHMD* HMD)
+FGSXRRenderBridge* CreateRenderBridge_OpenGL(FSnapdragonVRHMD* HMD)
 {
 	return new FGSXRRenderBridge_OpenGL(HMD);
 }

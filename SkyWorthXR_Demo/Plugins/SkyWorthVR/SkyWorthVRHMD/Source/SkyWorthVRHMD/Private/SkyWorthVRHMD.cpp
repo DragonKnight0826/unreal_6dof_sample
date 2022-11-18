@@ -1,19 +1,19 @@
 //=============================================================================
-// FILE: SkyWorthVRHMD.cpp
+// FILE: SnapdragonVRHMD.cpp
 //
 //                  Copyright (c) 2016 QUALCOMM Technologies Inc.
 //                              All Rights Reserved.
 //
 //=============================================================================
 
-#include "SkyWorthVRHMD.h"
+#include "SnapdragonVRHMD.h"
 
 #include "HardwareInfo.h"
-#include "../Public/SkyWorthVRHMDFunctionLibrary.h"
+#include "../Public/SnapdragonVRHMDFunctionLibrary.h"
 
-#include "../Classes/SkyWorthVRHMDEventManager.h"
+#include "../Classes/SnapdragonVRHMDEventManager.h"
 
-#include "SkyWorthXR_CVars.h"
+#include "SnapdragonXR_CVars.h"
 
 #include "XRThreadUtils.h"
 #include "Renderer/Private/RendererPrivate.h"
@@ -30,25 +30,6 @@
 #include "Misc/CoreDelegates.h"
 
 #include "Core/Public/HAL/RunnableThread.h"
-#include "SXRLoader.h"
-#include "sxrApi.h"
-//#include "SkyWorthVROther/Public/MotionUtilsImple.h"
-
-//#define GL_FOVEATION_ENABLE_BIT_QCOM 0x01
-//#define GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM 0x02
-#define GL_TEXTURE_FOVEATED_FEATURE_BITS_QCOM 0x8BFB
-#define GL_TEXTURE_FOVEATED_FEATURE_QUERY_QCOM 0x8BFD
-#define GL_FRAMEBUFFER_INCOMPLETE_FOVEATION_QCOM 0x8BFF
-#define GL_TEXTURE_FOVEATED_MIN_PIXEL_DENSITY_QCOM 0x8BFC
-#define GL_TEXTURE_FOVEATED_NUM_FOCAL_POINTS_QUERY_QCOM 0x8BFE
-#define GL_CHECK(x) \
-    x; \
-    { \
-        GLenum glError = glGetError(); \
-        if(glError != GL_NO_ERROR) { \
-            XR_FAIL("glGetError() = %i (0x%.8x) at %s:%i\n", glError, glError, __FILE__, __LINE__); \
-        } \
-    }
 
 bool InGameThread()
 {
@@ -56,7 +37,10 @@ bool InGameThread()
 	{
 		return FPlatformTLS::GetCurrentThreadId() == GGameThreadId;
 	}
-	return true;
+	else
+	{
+		return true;
+	}
 }
 
 bool InRenderThread()
@@ -65,28 +49,30 @@ bool InRenderThread()
 	{
 		return IsInActualRenderingThread();
 	}
-	return InGameThread();
+	else
+	{
+		return InGameThread();
+	}
 }
 
 DECLARE_CYCLE_STAT(TEXT("Update Player Camera"), STAT_UpdatePlayerCamera, STATGROUP_Tickables);
 
 #if PLATFORM_ANDROID
 
-extern "C" SxrResult GSXRInitializeOptArgs(const sxrInitParams* pInitParams, void* pTmAPI);
+extern "C" GSXRResult GSXRInitializeOptArgs(const GSXRInitParams* pInitParams, void* pTmAPI);
 
 /*
 It appears that we must ensure that sxrEndVr() (which is always called on the CPU thread) never overlaps with
-sxrSubmitFrame() (which is always called on the render thread) by mutexing bInVRMode in those cases.  Otherwise, we can
+SC::GSXR_nativeSubmitDataFrame() (which is always called on the render thread) by mutexing bInVRMode in those cases.  Otherwise, we can
 get mysterious deadlocks during suspend/resume (seemingly only if the phone is not plugged into USB!  Plugged in USB
 phones never reproduced this deadlock).
 
 It is equally important that we do *not* try to use this thread synchronization construct to guard against other times
 bInVRMode is used (for example, at startup), or else a different mysterious deadlock on app launch occurs.  @todo NTF:
 understand what's really going on here
-
 */
-//FCriticalSection FSkyWorthVRHMDCustomPresent::InVRModeCriticalSection;
-//FCriticalSection FSkyWorthVRHMDCustomPresent::PerfLevelCriticalSection;
+FCriticalSection FSnapdragonVRHMDCustomPresent::InVRModeCriticalSection;
+FCriticalSection FSnapdragonVRHMDCustomPresent::PerfLevelCriticalSection;
 
 #include <android_native_app_glue.h>
 #include "Android/AndroidEGL.h"
@@ -99,14 +85,10 @@ understand what's really going on here
 
 #include "DrawDebugHelpers.h"
 
-#include "sxrApi.h"
+#include "SCGSXRApi.h"
 DEFINE_LOG_CATEGORY(LogSVR);
 
-#if SkyWorthVR_HMD_SUPPORTED_PLATFORMS
-
-typedef void (GL_APIENTRYP PFNGLTEXTUREFOVEATIONPARAMETERSEXT)(GLuint texture, GLuint layer, GLuint focalPoint, GLfloat focalX, GLfloat focalY, GLfloat gainX, GLfloat gainY, GLfloat foveaArea);
-
-PFNGLTEXTUREFOVEATIONPARAMETERSEXT	glTextureFoveationParametersQCOM = NULL;
+#if SNAPDRAGONVR_HMD_SUPPORTED_PLATFORMS
 
 static const TCHAR* const GSXRPerfLevelSystemCStr = TEXT("sys");
 static const TCHAR* const GSXRPerfLevelMinimumCStr = TEXT("min");
@@ -115,11 +97,11 @@ static const TCHAR* const GSXRPerfLevelMaximumCStr = TEXT("max");
 
 //keep these two lines in sync (eg pass the string that corresponds to the enum)
 static const TCHAR* const GSXRPerfLevelDefaultCStr = GSXRPerfLevelSystemCStr;
-/*static*/ enum sxrPerfLevel FSkyWorthVRHMD::GetCVarSkyWorthVrPerfLevelDefault() { return kPerfMedium; }
+/*static*/ enum GSXRPerfLevel FSnapdragonVRHMD::GetCVarSnapdragonVrPerfLevelDefault() { return kGSXRPerfMedium; }
 
 //these variables default values can be overridden by adding a line like this to Engine\Config\ConsoleVariables.ini: sxr.perfCpu=max
-static TAutoConsoleVariable<FString> CVarPerfLevelCpu(TEXT("sxr.perfCpu"), GSXRPerfLevelDefaultCStr, TEXT("Set SkyWorthVr CPU performance consumption to one of the following: sys, min, med, max.  Note that if this value is set by Blueprint, the cvar will continue to report the last value it was set to, and will not reflect the value set by Blueprint"));
-static TAutoConsoleVariable<FString> CVarPerfLevelGpu(TEXT("sxr.perfGpu"), GSXRPerfLevelDefaultCStr, TEXT("Set SkyWorthVr GPU performance consumption to one of the following: sys, min, med, max.  Note that if this value is set by Blueprint, the cvar will continue to report the last value it was set to, and will not reflect the value set by Blueprint"));
+static TAutoConsoleVariable<FString> CVarPerfLevelCpu(TEXT("sxr.perfCpu"), GSXRPerfLevelDefaultCStr, TEXT("Set SnapdragonVr CPU performance consumption to one of the following: sys, min, med, max.  Note that if this value is set by Blueprint, the cvar will continue to report the last value it was set to, and will not reflect the value set by Blueprint"));
+static TAutoConsoleVariable<FString> CVarPerfLevelGpu(TEXT("sxr.perfGpu"), GSXRPerfLevelDefaultCStr, TEXT("Set SnapdragonVr GPU performance consumption to one of the following: sys, min, med, max.  Note that if this value is set by Blueprint, the cvar will continue to report the last value it was set to, and will not reflect the value set by Blueprint"));
 
 //BEG_Q3D_AUDIO_HACK
 #if !UE_BUILD_SHIPPING
@@ -132,32 +114,26 @@ static TAutoConsoleVariable<int32> CVarQ3D_LogSoundNumber(TEXT("q3d.logSoundNumb
 
 
 //-----------------------------------------------------------------------------
-
-void initGLExt() {
-	glTextureFoveationParametersQCOM = (PFNGLTEXTUREFOVEATIONPARAMETERSEXT)eglGetProcAddress(
-		"glTextureFoveationParametersQCOM");
-}
-
-static bool FStringToSvrPerfLevel(enum sxrPerfLevel* OutPerfLevel, const FString& InValueReceived)
+static bool FStringToSvrPerfLevel(enum GSXRPerfLevel* OutPerfLevel, const FString& InValueReceived)
 {
     if (InValueReceived.Compare(FString(GSXRPerfLevelSystemCStr, ESearchCase::IgnoreCase)) == 0)
     {
-        *OutPerfLevel = kPerfSystem;
+        *OutPerfLevel = kGSXRPerfSystem;
         return true;
     }
     else if (InValueReceived.Compare(FString(GSXRPerfLevelMinimumCStr, ESearchCase::IgnoreCase)) == 0)
     {
-        *OutPerfLevel = kPerfMinimum;
+        *OutPerfLevel = kGSXRPerfMinimum;
         return true;
     }
     else if (InValueReceived.Compare(FString(GSXRPerfLevelMediumCStr, ESearchCase::IgnoreCase)) == 0)
     {
-        *OutPerfLevel = kPerfMedium;
+        *OutPerfLevel = kGSXRPerfMedium;
         return true;
     }
     else if (InValueReceived.Compare(FString(GSXRPerfLevelMaximumCStr, ESearchCase::IgnoreCase)) == 0)
     {
-        *OutPerfLevel = kPerfMaximum;
+        *OutPerfLevel = kGSXRPerfMaximum;
         return true;
     }
     else
@@ -167,26 +143,26 @@ static bool FStringToSvrPerfLevel(enum sxrPerfLevel* OutPerfLevel, const FString
 }
 
 //-----------------------------------------------------------------------------
-static bool SvrPerfLevelToFString(FString* const OutPerfLevelFString, const enum sxrPerfLevel InPerfLevel)
+static bool SvrPerfLevelToFString(FString* const OutPerfLevelFString, const enum GSXRPerfLevel InPerfLevel)
 {
     switch (InPerfLevel)
     {
-    case kPerfSystem:
+    case kGSXRPerfSystem:
     {
         *OutPerfLevelFString = FString(GSXRPerfLevelSystemCStr);
         return true;
     }
-    case kPerfMinimum:
+    case kGSXRPerfMinimum:
     {
         *OutPerfLevelFString = FString(GSXRPerfLevelMinimumCStr);
         return true;
     }
-    case kPerfMedium:
+    case kGSXRPerfMedium:
     {
         *OutPerfLevelFString = FString(GSXRPerfLevelMediumCStr);
         return true;
     }
-    case kPerfMaximum:
+    case kGSXRPerfMaximum:
     {
         *OutPerfLevelFString = FString(GSXRPerfLevelMaximumCStr);
         return true;
@@ -199,36 +175,36 @@ static bool SvrPerfLevelToFString(FString* const OutPerfLevelFString, const enum
 }
 
 //-----------------------------------------------------------------------------
-static bool IsPerfLevelValid(const enum sxrPerfLevel InPerfLevel)
+static bool IsPerfLevelValid(const enum GSXRPerfLevel InPerfLevel)
 {
-    return InPerfLevel >= kPerfSystem && InPerfLevel <= kPerfMaximum;
+    return InPerfLevel >= kGSXRPerfSystem && InPerfLevel <= kGSXRPerfMaximum;
 }
 
 // CTORNE ->
-/*static*/ enum sxrPerfLevel FSkyWorthVRHMD::PerfLevelCpuLastSet = kNumPerfLevels, FSkyWorthVRHMD::PerfLevelGpuLastSet = kNumPerfLevels;
+/*static*/ enum GSXRPerfLevel FSnapdragonVRHMD::PerfLevelCpuLastSet = kGSXRNumPerfLevels, FSnapdragonVRHMD::PerfLevelGpuLastSet = kGSXRNumPerfLevels;
 // <- CTORNE
 
 //-----------------------------------------------------------------------------
-/*static*/ void PerfLevelLastSet(enum sxrPerfLevel* const OutPerfLevel, const enum sxrPerfLevel InPerfLevel)
+/*static*/ void PerfLevelLastSet(enum GSXRPerfLevel* const OutPerfLevel, const enum GSXRPerfLevel InPerfLevel)
 {
 	check(IsPerfLevelValid(InPerfLevel));
 	*OutPerfLevel = InPerfLevel;
 }
 
 //-----------------------------------------------------------------------------
-/*static*/ void FSkyWorthVRHMD::PerfLevelCpuWrite(const enum sxrPerfLevel InPerfLevel)
+/*static*/ void FSnapdragonVRHMD::PerfLevelCpuWrite(const enum GSXRPerfLevel InPerfLevel)
 {
 	PerfLevelLastSet(&PerfLevelCpuLastSet, InPerfLevel);
 }
 
 //-----------------------------------------------------------------------------
-/*static*/ void FSkyWorthVRHMD::PerfLevelGpuWrite(const enum sxrPerfLevel InPerfLevel)
+/*static*/ void FSnapdragonVRHMD::PerfLevelGpuWrite(const enum GSXRPerfLevel InPerfLevel)
 {
 	PerfLevelLastSet(&PerfLevelGpuLastSet, InPerfLevel);
 }
 
 //-----------------------------------------------------------------------------
-/*static*/ void FSkyWorthVRHMD::PerfLevelLog(const TCHAR* const InPrefix,enum sxrPerfLevel InPerfLevelCpu, enum sxrPerfLevel InPerfLevelGpu)
+/*static*/ void FSnapdragonVRHMD::PerfLevelLog(const TCHAR* const InPrefix,enum GSXRPerfLevel InPerfLevelCpu, enum GSXRPerfLevel InPerfLevelGpu)
 {
 #if !UE_BUILD_SHIPPING
     FString PerfLevelCpuLastSetFString, PerfLevelGpuLastSetFString;
@@ -240,9 +216,9 @@ static bool IsPerfLevelValid(const enum sxrPerfLevel InPerfLevel)
 
 //-----------------------------------------------------------------------------
 static bool PerfLevelLastSetByCvarRead(
-	enum sxrPerfLevel* OutPerfLevel,
+	enum GSXRPerfLevel* OutPerfLevel,
 	const TAutoConsoleVariable<FString>& InCVar,
-	const enum sxrPerfLevel InPerfLevelDefault)
+	const enum GSXRPerfLevel InPerfLevelDefault)
 {
 	const bool bReadSucceeded = FStringToSvrPerfLevel(OutPerfLevel, InCVar.GetValueOnAnyThread());
 	if (!bReadSucceeded)
@@ -254,11 +230,11 @@ static bool PerfLevelLastSetByCvarRead(
 }
 
 //-----------------------------------------------------------------------------
-/*static*/ bool FSkyWorthVRHMD::PerfLevelsLastSetByCvarRead(
-	enum sxrPerfLevel* OutPerfLevelCpuCurrent,
-	enum sxrPerfLevel* OutPerfLevelGpuCurrent,
-	const enum sxrPerfLevel InPerfLevelCpuDefault,
-	const enum sxrPerfLevel InPerfLevelGpuDefault)
+/*static*/ bool FSnapdragonVRHMD::PerfLevelsLastSetByCvarRead(
+	enum GSXRPerfLevel* OutPerfLevelCpuCurrent,
+	enum GSXRPerfLevel* OutPerfLevelGpuCurrent,
+	const enum GSXRPerfLevel InPerfLevelCpuDefault,
+	const enum GSXRPerfLevel InPerfLevelGpuDefault)
 {
 	bool bValid = PerfLevelLastSetByCvarRead(OutPerfLevelCpuCurrent, CVarPerfLevelCpu, InPerfLevelCpuDefault);
 	bValid &= PerfLevelLastSetByCvarRead(OutPerfLevelGpuCurrent, CVarPerfLevelGpu, InPerfLevelGpuDefault);
@@ -266,92 +242,83 @@ static bool PerfLevelLastSetByCvarRead(
 }
 
 //-----------------------------------------------------------------------------
-static void PerfLevelOnChangeByCvar(enum sxrPerfLevel* const OutPerfLevelToSet, const IConsoleVariable* const InConsoleVar, const TCHAR* const InLogPrefix)
+static void PerfLevelOnChangeByCvar(enum GSXRPerfLevel* const OutPerfLevelToSet, const IConsoleVariable* const InConsoleVar, const TCHAR* const InLogPrefix)
 {
 	//sxr performance levels can be manipulated by render or game thread, so prevent race conditions
-	//FScopeLock ScopeLock(&FSkyWorthVRHMDCustomPresent::PerfLevelCriticalSection);
+	FScopeLock ScopeLock(&FSnapdragonVRHMDCustomPresent::PerfLevelCriticalSection);
 
-	enum sxrPerfLevel PerfLevel;
+	enum GSXRPerfLevel PerfLevel;
 	const bool bReadSucceeded = FStringToSvrPerfLevel(&PerfLevel, InConsoleVar->GetString());
 	if (bReadSucceeded)
 	{
 		PerfLevelLastSet(OutPerfLevelToSet, PerfLevel);
-		FSkyWorthVRHMD::PerfLevelLog(InLogPrefix, FSkyWorthVRHMD::PerfLevelCpuLastSet, FSkyWorthVRHMD::PerfLevelGpuLastSet);
-		sxrSetPerformanceLevels(FSkyWorthVRHMD::PerfLevelCpuLastSet, FSkyWorthVRHMD::PerfLevelGpuLastSet);
+		FSnapdragonVRHMD::PerfLevelLog(InLogPrefix, FSnapdragonVRHMD::PerfLevelCpuLastSet, FSnapdragonVRHMD::PerfLevelGpuLastSet);
+		SC::GSXR_nativeSetPerformanceLevels(FSnapdragonVRHMD::PerfLevelCpuLastSet, FSnapdragonVRHMD::PerfLevelGpuLastSet);
 	}
 }
 
 //-----------------------------------------------------------------------------
 static void PerfLevelCpuOnChangeByCvar(IConsoleVariable* InVar)
 {
-	PerfLevelOnChangeByCvar(&FSkyWorthVRHMD::PerfLevelCpuLastSet, InVar, TEXT("sxr.perfCpu cvar"));
+	PerfLevelOnChangeByCvar(&FSnapdragonVRHMD::PerfLevelCpuLastSet, InVar, TEXT("sxr.perfCpu cvar"));
 }
 
 //-----------------------------------------------------------------------------
 static void PerfLevelGpuOnChangeByCvar(IConsoleVariable* InVar)
 {
-	PerfLevelOnChangeByCvar(&FSkyWorthVRHMD::PerfLevelGpuLastSet, InVar, TEXT("sxr.perfGpu cvar"));
+	PerfLevelOnChangeByCvar(&FSnapdragonVRHMD::PerfLevelGpuLastSet, InVar, TEXT("sxr.perfGpu cvar"));
 }
-#endif//#if SkyWorthVR_SUPPORTED_PLATFORMS
+#endif//#if SNAPDRAGONVR_SUPPORTED_PLATFORMS
 
-const FName FSkyWorthVRHMD::SkyWorthVRHMDSystemName(TEXT("SkyWorthVRHMD"));
+const FName FSnapdragonVRHMD::SnapdragonVRHMDSystemName(TEXT("SnapdragonVRHMD"));
+
 
 
 //-----------------------------------------------------------------------------
-// FSkyWorthVRHMD, IHeadMountedDisplay Implementation
+// FSnapdragonVRHMD, IHeadMountedDisplay Implementation
 //-----------------------------------------------------------------------------
 
-void FSkyWorthVRHMD::RenderTexture_RenderThread(class FRHICommandListImmediate& RHICmdList,
-                                                  class FRHITexture2D* BackBuffer, class FRHITexture2D* SrcTexture,
-                                                  FVector2D WindowSize) const
+
+
+#if SNAPDRAGONVR_HMD_SUPPORTED_PLATFORMS
+
+//-----------------------------------------------------------------------------
+// Grab a pointer to the Snapdragon XR system
+FSnapdragonVRHMD* FSnapdragonVRHMD::GetSnapdragonHMD()
 {
-	// was empty originally
-	if (SpectatorScreenController)
+	if (GEngine->XRSystem.IsValid() && GEngine->XRSystem->GetSystemName() == FSnapdragonVRHMD::SnapdragonVRHMDSystemName)
 	{
-		SpectatorScreenController->RenderSpectatorScreen_RenderThread(RHICmdList, BackBuffer, SrcTexture, WindowSize);
-	}
-	// UE_LOG(LogSVR,Log,TEXT("RenderTexture_RenderThread Textureid:%d "),(*((uint32_t *)SrcTexture->GetNativeResource())));
-}
-
-#if SkyWorthVR_HMD_SUPPORTED_PLATFORMS
-
-//-----------------------------------------------------------------------------
-// Grab a pointer to the SkyWorth XR system
-FSkyWorthVRHMD* FSkyWorthVRHMD::GetSkyWorthHMD()
-{
-	if (GEngine->XRSystem.IsValid() && GEngine->XRSystem->GetSystemName() == FSkyWorthVRHMD::SkyWorthVRHMDSystemName)
-	{
-		return static_cast<FSkyWorthVRHMD*>(GEngine->XRSystem.Get());
+		return static_cast<FSnapdragonVRHMD*>(GEngine->XRSystem.Get());
 	}
 
 	return nullptr;
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::IsHMDEnabled() const
+bool FSnapdragonVRHMD::IsHMDEnabled() const
 {
     return true;
 }
 //-----------------------------------------------------------------------------
-FString FSkyWorthVRHMD::GetVersionString() const
+FString FSnapdragonVRHMD::GetVersionString() const
 {
-	FString s = FString::Printf(TEXT("SkyWorthVR - %s, built %s, %s"),
+	FString s = FString::Printf(TEXT("SnapdragonVR - %s, built %s, %s"),
 		*FEngineVersion::Current().ToString(), UTF8_TO_TCHAR(__DATE__), UTF8_TO_TCHAR(__TIME__));
 	return s;
 }
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::HasValidTrackingPosition()
+bool FSnapdragonVRHMD::HasValidTrackingPosition()
 {
 	// this actually tries to get one
 	return DoesSupportPositionalTracking();
 }
 
 //-----------------------------------------------------------------------------
-// void FSkyWorthVRHMD::SetFinalViewRect(const enum EStereoscopicPass StereoPass, const FIntRect& FinalViewRect)
+// void FSnapdragonVRHMD::SetFinalViewRect(const enum EStereoscopicPass StereoPass, const FIntRect& FinalViewRect)
 // {
 // //	CheckInRenderThread();
 
-// 	//UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::SetFinalViewRect()"));
+// 	//UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::SetFinalViewRect()"));
 
 // //	const int32 ViewIndex = ViewIndexFromStereoPass(StereoPass);
 
@@ -367,20 +334,20 @@ bool FSkyWorthVRHMD::HasValidTrackingPosition()
 // }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::EnumerateTrackedDevices(TArray<int32>& OutDevices, EXRTrackedDeviceType Type /*= EXRTrackedDeviceType::Any*/)
+bool FSnapdragonVRHMD::EnumerateTrackedDevices(TArray<int32>& OutDevices, EXRTrackedDeviceType Type /*= EXRTrackedDeviceType::Any*/)
 {
 	if (Type == EXRTrackedDeviceType::Any || Type == EXRTrackedDeviceType::HeadMountedDisplay)
 	{
 		OutDevices.Add(IXRTrackingSystem::HMDDeviceId);
-		UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::EnumerateTrackedDevices() - added device"));
+		UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::EnumerateTrackedDevices() - added device"));
 		return true;
 	}
-	UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::EnumerateTrackedDevices() - no device added"));
+	UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::EnumerateTrackedDevices() - no device added"));
 	return false;
  }
 
 //-----------------------------------------------------------------------------
-void  FSkyWorthVRHMD::UpdatePoses()
+void  FSnapdragonVRHMD::UpdatePoses()
 // rbf validate
 {
 	// Don't update poses if on the render thread
@@ -388,6 +355,9 @@ void  FSkyWorthVRHMD::UpdatePoses()
 	{
 		return;
 	}
+
+
+
 	// UE_LOG(LogSVR, Error, TEXT("sxr (%s) (Frame %d) UpdatePoses() => Calling GetHeadPoseState"), IsInRenderingThread() ? TEXT("Render") : TEXT("Game"), GFrameNumber);
 	// sxrprint("(%s) (Frame %d) UpdatePoses() => Calling GetHeadPoseState", IsInRenderingThread() ? TEXT("Render") : TEXT("Game"), GFrameNumber);
 
@@ -395,26 +365,34 @@ void  FSkyWorthVRHMD::UpdatePoses()
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::UpdateMyPoses(sxrHeadPoseState& Pose)
+void FSnapdragonVRHMD::UpdateMyPoses(GSXRHeadPoseState& Pose)
 {
 	GetHeadPoseState(Pose);
 }
 
 //-----------------------------------------------------------------------------
 // rbf validate
-bool FSkyWorthVRHMD::GetCurrentPose(int32 DeviceId, FQuat& OutOrientation, FVector& OutPosition)
+bool FSnapdragonVRHMD::GetCurrentPose(int32 DeviceId, FQuat& OutOrientation, FVector& OutPosition)
 {
 	OutOrientation = FQuat::Identity;
 	OutPosition = FVector::ZeroVector;
 
 	if (DeviceId != HMDDeviceId)
 	{
-		UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::GetCurrentPose() - Device error %d != %d"), DeviceId, HMDDeviceId);
+		UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::GetCurrentPose() - Device error %d != %d"), DeviceId, HMDDeviceId);
 		return false;
 	}
 
-	// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::GetCurrentPose() from %s thread for frame:%d/%d"), IsInRenderingThread() ? TEXT("Render") : TEXT("Game"), GFrameNumber, GFrameNumberRenderThread );
+	// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::GetCurrentPose() from %s thread for frame:%d/%d"), IsInRenderingThread() ? TEXT("Render") : TEXT("Game"), GFrameNumber, GFrameNumberRenderThread );
 
+	//PoseToOrientationAndPosition(CachedHeadPoseState.pose, CurrentOrientation, CurrentPosition, GetWorldToMetersScale());
+	//CurHmdOrientation = LastHmdOrientation = BaseOrientation * CurrentOrientation;
+	//CurHmdPosition = LastHmdPosition = CurrentPosition;
+	// if(!bStartRendering)
+	// {
+	// 	return false;
+	// }
+	// UpdateSensorData();	
 	if (IsInRenderingThread())
 	{
 		if (bIsEndGameFrame)
@@ -428,23 +406,19 @@ bool FSkyWorthVRHMD::GetCurrentPose(int32 DeviceId, FQuat& OutOrientation, FVect
 	{
 		OutOrientation = CurrentFrame_GameThread.Orientation;
 		OutPosition = CurrentFrame_GameThread.Position;
-
-		RenderBridge->SwapChain->ReleaseCurrentImage_RHIThread();
-
-		FlushRenderingCommands();
 	}
 
 	return true;
 }
 
-void FSkyWorthVRHMD::UpdateSensorData()
+void FSnapdragonVRHMD::UpdateSensorData()
 {
-	float PredictedTime = sxrGetPredictedDisplayTime();
+	float PredictedTime = SC::GSXR_nativeGetPredictedDisplayTime();
 
 	
 	// sxrprint("(%s) (Frame %d) GetHeadPoseState() => Getting head pose for %0.2f ms", IsInRenderingThread() ? TEXT("Render") : TEXT("Game"), GFrameNumber, PredictedTime);
 	
-	sxrHeadPoseState HeadPoseState = sxrGetPredictedHeadPose(PredictedTime);
+	GSXRHeadPoseState HeadPoseState = SC::GSXR_nativeGetPredictedPose(PredictedTime);
 
 	FVector CurrentPosition;
 	FQuat CurrentOrientation;
@@ -461,57 +435,57 @@ void FSkyWorthVRHMD::UpdateSensorData()
 #pragma region EyeTracking
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::isEyeTrackingEnabled()const
+bool FSnapdragonVRHMD::isEyeTrackingEnabled()const
 {
 	return  0 != CVars::EyeTrackingEnabled;
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::enableEyeTracking(bool b)
+void FSnapdragonVRHMD::enableEyeTracking(bool b)
 {
 	CVars::EyeTrackingEnabled = b ? 1 : 0;
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::GetEyePoseState(int32 DeviceId, sxrEyePoseState& EyePoseState)
+bool FSnapdragonVRHMD::GetEyePoseState(int32 DeviceId, GSXREyePoseState& EyePoseState)
 {
 	if (DeviceId != HMDDeviceId)
 	{
-		UE_LOG(LogSVR, Error, TEXT("FSkyWorthVRHMD::GetEyePoseState() - Device error %d != %d"), DeviceId, HMDDeviceId);
+		UE_LOG(LogSVR, Error, TEXT("FSnapdragonVRHMD::GetEyePoseState() - Device error %d != %d"), DeviceId, HMDDeviceId);
 		return false;
 	}
 
-	/*if (!pSkyWorthVRBridge->bInVRMode)
+	/*if (!pSnapdragonVRBridge->bInVRMode)
 	{
-		UE_LOG(LogSVR, Error, TEXT("FSkyWorthVRHMD::GetEyePoseState() - Not in VRMode"));
+		UE_LOG(LogSVR, Error, TEXT("FSnapdragonVRHMD::GetEyePoseState() - Not in VRMode"));
 		return false;
 	}*/
 
-	if ((sxrGetSupportedTrackingModes() & kTrackingEye) == 0)
+	if ((SC::GSXR_nativeGetSupportSlamMode() & kGSXRTrackingEye) == 0)
 	{
-		UE_LOG(LogSVR, Error, TEXT("FSkyWorthVRHMD::GetEyePoseState() - EyeTracking not available"));
+		UE_LOG(LogSVR, Error, TEXT("FSnapdragonVRHMD::GetEyePoseState() - EyeTracking not available"));
 		return false;
 	}
 
-	// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::GetEyePoseState() from %s thread for frame:%d/%d"), IsInRenderingThread() ? TEXT("Render") : TEXT("Game"), GFrameNumber, GFrameNumberRenderThread);
+	// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::GetEyePoseState() from %s thread for frame:%d/%d"), IsInRenderingThread() ? TEXT("Render") : TEXT("Game"), GFrameNumber, GFrameNumberRenderThread);
 
-	if (sxrGetEyePose(&EyePoseState) != SXR_ERROR_NONE)
+	if (SC::GSXR_nativeGetEyePose(&EyePoseState) != GSXR_ERROR_NONE)
 	{	// if you get here...
-		// sxrGetEyePose will write out the error into the log  - look for "sxrGetEyePose Failed" because the call to the service failed...
-		UE_LOG(LogSVR, Error, TEXT("FSkyWorthVRHMD::GetEyePoseState - sxrGetEyePose Failed"));
+		// SC::GSXR_nativeGetEyePose will write out the error into the log  - look for "SC::GSXR_nativeGetEyePose Failed" because the call to the service failed...
+		UE_LOG(LogSVR, Error, TEXT("FSnapdragonVRHMD::GetEyePoseState - SC::GSXR_nativeGetEyePose Failed"));
 		return false;
 	}
 
-	//UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::GetEyePoseState() says left position is %s and is [%6.3f,%6.3f,%6.3f]"),
+	//UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::GetEyePoseState() says left position is %s and is [%6.3f,%6.3f,%6.3f]"),
 	//	isEyeGazePointValid(EyePoseState.leftEyePoseStatus) ? TEXT("Valid") : TEXT("Invalid"), EyePoseState.leftEyeGazePoint[0], EyePoseState.leftEyeGazePoint[1], EyePoseState.leftEyeGazePoint[2]);
-	//UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::GetEyePoseState() says left direction is %s and is [%6.3f,%6.3f,%6.3f]"),
+	//UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::GetEyePoseState() says left direction is %s and is [%6.3f,%6.3f,%6.3f]"),
 	//	isEyeGazeDirectionValid(EyePoseState.leftEyePoseStatus) ? TEXT("Valid") : TEXT("Invalid"), EyePoseState.leftEyeGazeVector[0], EyePoseState.leftEyeGazeVector[1], EyePoseState.leftEyeGazeVector[2]);
 
 	return true;
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::GetRelativeEyeDirection(int32 DeviceId, FVector& OutDirection)
+bool FSnapdragonVRHMD::GetRelativeEyeDirection(int32 DeviceId, FVector& OutDirection)
 {
 	// Apply CS transform position SVR to UE4 (-Z[2], X[0], Y[1])
 	FVector eyeDirections[3] =
@@ -529,7 +503,7 @@ bool FSkyWorthVRHMD::GetRelativeEyeDirection(int32 DeviceId, FVector& OutDirecti
 	if (bGazeVectorValidBoth && bGazeVectorValidLeft && bGazeVectorValidRight) // Use combinedEyeDirection
 	{
 		OutDirection = eyeDirections[2];
-		UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::GetRelativeEyeDirection combinedEyeDirection = x:%f, y:%f, z:%f"), OutDirection.X, OutDirection.Y, OutDirection.Z);
+		UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::GetRelativeEyeDirection combinedEyeDirection = x:%f, y:%f, z:%f"), OutDirection.X, OutDirection.Y, OutDirection.Z);
 		return true;
 	}
 	else if ( bGazeVectorValidLeft || bGazeVectorValidRight )	// Average left/rightEyeDirection
@@ -538,10 +512,10 @@ bool FSkyWorthVRHMD::GetRelativeEyeDirection(int32 DeviceId, FVector& OutDirecti
 		if (bGazeVectorValidLeft) OutDirection += eyeDirections[0];
 		if (bGazeVectorValidRight) OutDirection += eyeDirections[1];
 		OutDirection.Normalize();
-		UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::GetRelativeEyeDirection averagedEyeDirection = x:%f, y:%f, z:%f"), OutDirection.X, OutDirection.Y, OutDirection.Z);
+		UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::GetRelativeEyeDirection averagedEyeDirection = x:%f, y:%f, z:%f"), OutDirection.X, OutDirection.Y, OutDirection.Z);
 		return true;
 
-		//dbgprint("FSkyWorthVRHMD::GetRelativeEyeDirection EyeDirection = x:%f, y:%f, z:%f", OutDirection.X, OutDirection.Y, OutDirection.Z);
+		//dbgprint("FSnapdragonVRHMD::GetRelativeEyeDirection EyeDirection = x:%f, y:%f, z:%f", OutDirection.X, OutDirection.Y, OutDirection.Z);
 	}
 	return false;
 }
@@ -549,7 +523,7 @@ bool FSkyWorthVRHMD::GetRelativeEyeDirection(int32 DeviceId, FVector& OutDirecti
 //-----------------------------------------------------------------------------
 // We don't really follow the instructions for this call....
 #if ENGINE_MAJOR_VERSION == 5
-bool FSkyWorthVRHMD::GetRelativeEyePose(int32 DeviceId, int32 ViewIndex, FQuat& OutOrientation, FVector& OutPosition)
+bool FSnapdragonVRHMD::GetRelativeEyePose(int32 DeviceId, int32 ViewIndex, FQuat& OutOrientation, FVector& OutPosition)
 {
 	OutOrientation = FQuat::Identity;
 	OutPosition = FVector::ZeroVector;
@@ -561,7 +535,7 @@ bool FSkyWorthVRHMD::GetRelativeEyePose(int32 DeviceId, int32 ViewIndex, FQuat& 
 	return false;
 }
 #else
-bool FSkyWorthVRHMD::GetRelativeEyePose(int32 DeviceId, EStereoscopicPass Eye, FQuat& OutOrientation, FVector& OutPosition)
+bool FSnapdragonVRHMD::GetRelativeEyePose(int32 DeviceId, EStereoscopicPass Eye, FQuat& OutOrientation, FVector& OutPosition)
 {
 	OutOrientation = FQuat::Identity;
 	OutPosition = FVector::ZeroVector;
@@ -574,20 +548,20 @@ bool FSkyWorthVRHMD::GetRelativeEyePose(int32 DeviceId, EStereoscopicPass Eye, F
 }
 #endif
 //-----------------------------------------------------------------------------
-const sxrEyePoseState& FSkyWorthVRHMD::GetLatestEyePoseState() // GetCurrentEyePose()
+const GSXREyePoseState& FSnapdragonVRHMD::GetLatestEyePoseState() // GetCurrentEyePose()
 {
 	return CachedEyePoseState;
 }
 
 #pragma endregion EyeTracking
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::EnableHMD(bool allow)
+void FSnapdragonVRHMD::EnableHMD(bool allow)
 {
 	// EnableStereo(allow);
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::GetHMDMonitorInfo(MonitorInfo& MonitorDesc)
+bool FSnapdragonVRHMD::GetHMDMonitorInfo(MonitorInfo& MonitorDesc)
 {
     // if (IsInitialized())
     // {
@@ -609,7 +583,7 @@ bool FSkyWorthVRHMD::GetHMDMonitorInfo(MonitorInfo& MonitorDesc)
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::GetFieldOfView(float& OutHFOVInDegrees, float& OutVFOVInDegrees) const
+void FSnapdragonVRHMD::GetFieldOfView(float& OutHFOVInDegrees, float& OutVFOVInDegrees) const
 {
 	if(!bInitialized)
 	{
@@ -617,7 +591,7 @@ void FSkyWorthVRHMD::GetFieldOfView(float& OutHFOVInDegrees, float& OutVFOVInDeg
 		OutVFOVInDegrees = 90.0;
 		return;
 	}
-	sxrDeviceInfo di = sxrGetDeviceInfo();
+	GSXRDeviceInfo di = SC::GSXR_nativeGetDeviceInfo();
 	
     OutHFOVInDegrees = FMath::RadiansToDegrees(di.targetFovXRad);
     OutVFOVInDegrees = FMath::RadiansToDegrees(di.targetFovYRad);
@@ -625,106 +599,106 @@ void FSkyWorthVRHMD::GetFieldOfView(float& OutHFOVInDegrees, float& OutVFOVInDeg
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::DoesSupportPositionalTracking() const
+bool FSnapdragonVRHMD::DoesSupportPositionalTracking() const
 {
 	if(!bInitialized)
 	{
 		return false;
 	}
-	sxrDeviceInfo di = sxrGetDeviceInfo();
-    const unsigned int supportedTrackingModes = sxrGetSupportedTrackingModes();
+	GSXRDeviceInfo di = SC::GSXR_nativeGetDeviceInfo();
+    const unsigned int supportedTrackingModes = SC::GSXR_nativeGetSupportSlamMode();
 
-    const bool bTrackingPosition = supportedTrackingModes & kTrackingPosition;
+    const bool bTrackingPosition = supportedTrackingModes & kGSXRTrackingPosition;
 	UE_LOG(LogSVR,Log,TEXT("DoesSupportPositionalTracking:%d"),bTrackingPosition);
     return bTrackingPosition;
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::SetInterpupillaryDistance(float NewInterpupillaryDistance)
+void FSnapdragonVRHMD::SetInterpupillaryDistance(float NewInterpupillaryDistance)
 {
-	UE_LOG(LogSVR, Log, TEXT("SkyWorthVR - call to SetInterpupillaryDistance is nop"));
+	UE_LOG(LogSVR, Log, TEXT("SnapdragonVR - call to SetInterpupillaryDistance is nop"));
     //Do Nothing
 }
 
-float FSkyWorthVRHMD::GetInterpupillaryDistance() const
+float FSnapdragonVRHMD::GetInterpupillaryDistance() const
 {
     return 0.064f;
 }
 
 
-// TSharedPtr<ISceneViewExtension, ESPMode::ThreadSafe> FSkyWorthVRHMD::GetViewExtension()
+// TSharedPtr<ISceneViewExtension, ESPMode::ThreadSafe> FSnapdragonVRHMD::GetViewExtension()
 // {
-//     TSharedPtr<FSkyWorthVRHMD, ESPMode::ThreadSafe> ptr(AsShared());
+//     TSharedPtr<FSnapdragonVRHMD, ESPMode::ThreadSafe> ptr(AsShared());
 //     return StaticCastSharedPtr<ISceneViewExtension>(ptr);
 // }
 
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::IsChromaAbCorrectionEnabled() const
+bool FSnapdragonVRHMD::IsChromaAbCorrectionEnabled() const
 {
     return false;
 }
 
 //-----------------------------------------------------------------------------
-// bool FSkyWorthVRHMD::IsHeadTrackingAllowed() const
+// bool FSnapdragonVRHMD::IsHeadTrackingAllowed() const
 // {
 //     return true;
 // }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::ResetOrientationAndPosition(float yaw)
+void FSnapdragonVRHMD::ResetOrientationAndPosition(float yaw)
 {
     ResetOrientation(yaw);
     ResetPosition();
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::ResetOrientation(float yaw)
+void FSnapdragonVRHMD::ResetOrientation(float yaw)
 {
-	UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::ResetOrientation()"));
-	sxrRecenterOrientation(true);
+	UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::ResetOrientation()"));
+	SC::GSXR_nativeRecenterOrientation(true);
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::ResetPosition()
+void FSnapdragonVRHMD::ResetPosition()
 {
-	UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::ResetPosition()"));
-	sxrRecenterPosition();
+	UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::ResetPosition()"));
+	SC::GSXR_nativeRecenterPosition();
 }
 
 //-----------------------------------------------------------------------------
-float FSkyWorthVRHMD::GetWorldToMetersScale() const
+float FSnapdragonVRHMD::GetWorldToMetersScale() const
 {
 	return GWorld ? GWorld->GetWorldSettings()->WorldToMeters : 100.0f;  // RBF validate
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::SetBaseRotation(const FRotator& BaseRot)
+void FSnapdragonVRHMD::SetBaseRotation(const FRotator& BaseRot)
 {
 	// SetBaseOrientation(FRotator(0.0f, BaseRot.Yaw, 0.0f).Quaternion());
 }
 
-bool FSkyWorthVRHMD::HandleInputKey(UPlayerInput*, const FKey& Key, EInputEvent EventType, float AmountDepressed, bool bGamepad)
+bool FSnapdragonVRHMD::HandleInputKey(UPlayerInput*, const FKey& Key, EInputEvent EventType, float AmountDepressed, bool bGamepad)
 {
 	UE_LOG(LogSVR, Log, TEXT("AndroidKey = %s"),*Key.ToString());
 	return false;
 }
 
 //-----------------------------------------------------------------------------
-FRotator FSkyWorthVRHMD::GetBaseRotation() const
+FRotator FSnapdragonVRHMD::GetBaseRotation() const
 {
 	// return GetBaseOrientation().Rotator();
 	return FRotator::ZeroRotator;
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::SetBaseOrientation(const FQuat& BaseOrient)
+void FSnapdragonVRHMD::SetBaseOrientation(const FQuat& BaseOrient)
 {
 	// BaseOrientation = BaseOrient;
 }
 
 //-----------------------------------------------------------------------------
-FQuat FSkyWorthVRHMD::GetBaseOrientation() const
+FQuat FSnapdragonVRHMD::GetBaseOrientation() const
 {
 	// return BaseOrientation;
 	return FQuat::Identity;
@@ -751,65 +725,90 @@ static void DrawOcclusionMesh(FRHICommandList& RHICmdList, int32 StereoPass, con
 }
 #if ENGINE_MAJOR_VERSION == 5
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::DrawHiddenAreaMesh(class FRHICommandList& RHICmdList, int32 ViewIndex) const
+void FSnapdragonVRHMD::DrawHiddenAreaMesh(class FRHICommandList& RHICmdList, int32 ViewIndex) const
 {
 	//DrawOcclusionMesh(RHICmdList, ViewIndex, HiddenAreaMeshes);
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::DrawVisibleAreaMesh(class FRHICommandList& RHICmdList, int32 ViewIndex) const
+void FSnapdragonVRHMD::DrawVisibleAreaMesh(class FRHICommandList& RHICmdList, int32 ViewIndex) const
 {
     //Do Nothing
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::DrawDistortionMesh_RenderThread(struct FHeadMountedDisplayPassContext& Context, const FIntPoint& TextureSize)
+void FSnapdragonVRHMD::DrawDistortionMesh_RenderThread(struct FHeadMountedDisplayPassContext& Context, const FIntPoint& TextureSize)
 {
     //Do Nothing
 }
 #else
-void FSkyWorthVRHMD::DrawHiddenAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const
+void FSnapdragonVRHMD::DrawHiddenAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const
 {
 	DrawOcclusionMesh(RHICmdList, StereoPass, HiddenAreaMeshes);
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::DrawVisibleAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const
+void FSnapdragonVRHMD::DrawVisibleAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const
 {
 	//Do Nothing
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::DrawDistortionMesh_RenderThread(struct FRenderingCompositePassContext& Context, const FIntPoint& TextureSize)
+void FSnapdragonVRHMD::DrawDistortionMesh_RenderThread(struct FRenderingCompositePassContext& Context, const FIntPoint& TextureSize)
 {
 	//Do Nothing
 }
 #endif
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::OnBeginPlay(FWorldContext& InWorldContext)
+void FSnapdragonVRHMD::OnBeginPlay(FWorldContext& InWorldContext)
 {
-    UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::OnBeginPlay"));
+    UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::OnBeginPlay"));
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::OnEndPlay(FWorldContext& InWorldContext)
+void FSnapdragonVRHMD::OnEndPlay(FWorldContext& InWorldContext)
 {
-    UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::OnEndPlay"));
+    UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::OnEndPlay"));
 	///StopWebHelper();
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::OnStartGameFrame( FWorldContext& WorldContext )
+bool FSnapdragonVRHMD::OnStartGameFrame( FWorldContext& WorldContext )
 {
 	UE_LOG(LogSVR,Log,TEXT("xmh OnStartGameFrame"));
+    //check(pSnapdragonVRBridge)
 
+    //if sensor fusion is inactive, but the app has been resumed and initialized on both the main thread and graphics thread, then start sensor fusion
+    /*if (bResumed && 
+        pSnapdragonVRBridge->bContextInitialized && 
+        !pSnapdragonVRBridge->bInVRMode &&
+        bInitialized)
+    {
+		UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::OnStartGameFrame() - starting"));
+        BeginVRMode();
+    }*/
+
+	// bool ReturnVal = true;  //  RBF cleanup
+
+	// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::OnStartGameFrame()"));
+
+
+	// UpdatePoses(); // GetHeadPoseState
+	// UpdateSensorData();	
+	// cache the eye pose info if we're eyetracking
+	// if ( isEyeTrackingEnabled() )
+	// {
+	// 	GetEyePoseState(IXRTrackingSystem::HMDDeviceId, CachedEyePoseState);
+	// }
+
+	// RefreshTrackingToWorldTransform(WorldContext);
 	LastFrame_GameThread = CurrentFrame_GameThread;
 	CurrentFrame_GameThread = LastFrame_RenderThread;
     return true;
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::OnEndGameFrame( FWorldContext& WorldContext )
+bool FSnapdragonVRHMD::OnEndGameFrame( FWorldContext& WorldContext )
 {
 	SendEvents();
 	ExecuteOnRenderThread_DoNotWait([this]()
@@ -825,25 +824,25 @@ bool FSkyWorthVRHMD::OnEndGameFrame( FWorldContext& WorldContext )
 /**
  * Called on the game thread when view family is about to be rendered.
  */
-void FSkyWorthVRHMD::OnBeginRendering_GameThread()
+void FSnapdragonVRHMD::OnBeginRendering_GameThread()
 {
-	// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::OnBeginRendering_GameThread()"));
+	// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::OnBeginRendering_GameThread()"));
 }
 
 //-----------------------------------------------------------------------------
 /**
  * Called on the render thread at the start of rendering.
  */
-void FSkyWorthVRHMD::OnBeginRendering_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneViewFamily& ViewFamily)
+void FSnapdragonVRHMD::OnBeginRendering_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneViewFamily& ViewFamily)
 {
-	// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::OnBeginRendering_RenderThread()"));
+	// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::OnBeginRendering_RenderThread()"));
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::GetHeadPoseState(sxrHeadPoseState& HeadPoseState)
+bool FSnapdragonVRHMD::GetHeadPoseState(GSXRHeadPoseState& HeadPoseState)
 {
 	// Can only update the pose if vr has been started
-	// if (!pSkyWorthVRBridge->bStartRendering)
+	// if (!pSnapdragonVRBridge->bStartRendering)
 	// {
 	// 	return false;
 	// }
@@ -851,12 +850,12 @@ bool FSkyWorthVRHMD::GetHeadPoseState(sxrHeadPoseState& HeadPoseState)
 	//! \brief Calculates a predicted head pose
 	//! \param predictedTimeMs Time ahead of the current time in ms to predict a head pose for
 	//! \return The predicted head pose and relevant pose state information
-	float PredictedTime = sxrGetPredictedDisplayTime();
+	float PredictedTime = SC::GSXR_nativeGetPredictedDisplayTime();
 
 	// UE_LOG(LogSVR, Error, TEXT("sxr (%s) (Frame %llu) GetHeadPoseState() => Getting head pose for %0.2f ms"), IsInRenderingThread() ? TEXT("Render") : TEXT("Game"), GFrameNumber, PredictedTime);
 	// sxrprint("(%s) (Frame %d) GetHeadPoseState() => Getting head pose for %0.2f ms", IsInRenderingThread() ? TEXT("Render") : TEXT("Game"), GFrameNumber, PredictedTime);
 	
-	HeadPoseState = sxrGetPredictedHeadPose(PredictedTime);
+	HeadPoseState = SC::GSXR_nativeGetPredictedPose(PredictedTime);
 
 	FVector CurrentPosition;
 	FQuat CurrentOrientation;
@@ -868,38 +867,38 @@ bool FSkyWorthVRHMD::GetHeadPoseState(sxrHeadPoseState& HeadPoseState)
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::SendEvents()
+void FSnapdragonVRHMD::SendEvents()
 {
-	sxrEvent SxrEvent;
-	while (sxrPollEvent(&SxrEvent))
+	GSXREvent SxrEvent;
+	while (SC::GSXR_nativePollEvent(&SxrEvent))
 	{
 		switch (SxrEvent.eventType)
 		{
-		case sxrEventType::kEventSdkServiceStarting:
-			USkyWorthVRHMDFunctionLibrary::GetSkyWorthVRHMDEventManager()->OnSkyWorthVRSdkServiceDelegate.Broadcast(ESkyWorthVRSdkServiceEventType::EventSdkServiceStarting);
+		case GSXREventType::kGSXREventSdkServiceStarting:
+			USnapdragonVRHMDFunctionLibrary::GetSnapdragonVRHMDEventManager()->OnSnapdragonVRSdkServiceDelegate.Broadcast(ESnapdragonVRSdkServiceEventType::EventSdkServiceStarting);
 			break;
-		case sxrEventType::kEventSdkServiceStarted:
-			USkyWorthVRHMDFunctionLibrary::GetSkyWorthVRHMDEventManager()->OnSkyWorthVRSdkServiceDelegate.Broadcast(ESkyWorthVRSdkServiceEventType::EventSdkServiceStarted);
+		case GSXREventType::kGSXREventSdkServiceStarted:
+			USnapdragonVRHMDFunctionLibrary::GetSnapdragonVRHMDEventManager()->OnSnapdragonVRSdkServiceDelegate.Broadcast(ESnapdragonVRSdkServiceEventType::EventSdkServiceStarted);
 			break;
-		case sxrEventType::kEventSdkServiceStopped:
-			USkyWorthVRHMDFunctionLibrary::GetSkyWorthVRHMDEventManager()->OnSkyWorthVRSdkServiceDelegate.Broadcast(ESkyWorthVRSdkServiceEventType::EventSdkServiceStopped);
+		case GSXREventType::kGSXREventSdkServiceStopped:
+			USnapdragonVRHMDFunctionLibrary::GetSnapdragonVRHMDEventManager()->OnSnapdragonVRSdkServiceDelegate.Broadcast(ESnapdragonVRSdkServiceEventType::EventSdkServiceStopped);
 			break;
-		case sxrEventType::kEventThermal:
+		case GSXREventType::kGSXREventThermal:
 		{
-			ESkyWorthVRThermalZone ThermalZone = static_cast<ESkyWorthVRThermalZone>(SxrEvent.eventData.thermal.zone);
-			ESkyWorthVRThermalLevel ThermalLevel = static_cast<ESkyWorthVRThermalLevel>(SxrEvent.eventData.thermal.level);
+			ESnapdragonVRThermalZone ThermalZone = static_cast<ESnapdragonVRThermalZone>(SxrEvent.eventData.thermal.zone);
+			ESnapdragonVRThermalLevel ThermalLevel = static_cast<ESnapdragonVRThermalLevel>(SxrEvent.eventData.thermal.level);
 
-			USkyWorthVRHMDFunctionLibrary::GetSkyWorthVRHMDEventManager()->OnSkyWorthVRThermalDelegate.Broadcast(ThermalZone, ThermalLevel);
+			USnapdragonVRHMDFunctionLibrary::GetSnapdragonVRHMDEventManager()->OnSnapdragonVRThermalDelegate.Broadcast(ThermalZone, ThermalLevel);
 			break;
 		}
-		case sxrEventType::kEventVrModeStarted:
-			USkyWorthVRHMDFunctionLibrary::GetSkyWorthVRHMDEventManager()->OnSkyWorthVRModeDelegate.Broadcast(ESkyWorthVRModeEventType::EventVrModeStarted);
+		case GSXREventType::kGSXREventVrModeStarted:
+			USnapdragonVRHMDFunctionLibrary::GetSnapdragonVRHMDEventManager()->OnSnapdragonVRModeDelegate.Broadcast(ESnapdragonVRModeEventType::EventVrModeStarted);
 			break;
-		case sxrEventType::kEventVrModeStopping:
-			USkyWorthVRHMDFunctionLibrary::GetSkyWorthVRHMDEventManager()->OnSkyWorthVRModeDelegate.Broadcast(ESkyWorthVRModeEventType::EventVrModeStopping);
+		case GSXREventType::kGSXREventVrModeStopping:
+			USnapdragonVRHMDFunctionLibrary::GetSnapdragonVRHMDEventManager()->OnSnapdragonVRModeDelegate.Broadcast(ESnapdragonVRModeEventType::EventVrModeStopping);
 			break;
-		case sxrEventType::kEventVrModeStopped:
-			USkyWorthVRHMDFunctionLibrary::GetSkyWorthVRHMDEventManager()->OnSkyWorthVRModeDelegate.Broadcast(ESkyWorthVRModeEventType::EventVrModeStopped);
+		case GSXREventType::kGSXREventVrModeStopped:
+			USnapdragonVRHMDFunctionLibrary::GetSnapdragonVRHMDEventManager()->OnSnapdragonVRModeDelegate.Broadcast(ESnapdragonVRModeEventType::EventVrModeStopped);
 			break;
 
 		default:
@@ -909,7 +908,7 @@ void FSkyWorthVRHMD::SendEvents()
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::DrawDebug(class UCanvas* Canvas, class APlayerController*)
+void FSnapdragonVRHMD::DrawDebug(class UCanvas* Canvas, class APlayerController*)
 {
     Canvas->DrawText(GEngine->GetLargeFont(), FText::Format( FText::FromString("Debug Draw {0}"), FText::AsNumber(GFrameNumber)), 10.f, 10.f);
 
@@ -917,10 +916,10 @@ void FSkyWorthVRHMD::DrawDebug(class UCanvas* Canvas, class APlayerController*)
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::DrawDebugTrackingCameraFrustum(UWorld* World, const FRotator& ViewRotation, const FVector& ViewLocation)
+void FSnapdragonVRHMD::DrawDebugTrackingCameraFrustum(UWorld* World, const FRotator& ViewRotation, const FVector& ViewLocation)
 {
 #if 0
-	FPlatformMisc::LowLevelOutputDebugStringf(TEXT("FSkyWorthVRHMD::DrawDebugTrackingCameraFrustum"));
+	FPlatformMisc::LowLevelOutputDebugStringf(TEXT("FSnapdragonVRHMD::DrawDebugTrackingCameraFrustum"));
 
 	const FColor c = (HasValidTrackingPosition() ? FColor::Green : FColor::Red);
 	FVector origin;
@@ -1000,15 +999,15 @@ void FSkyWorthVRHMD::DrawDebugTrackingCameraFrustum(UWorld* World, const FRotato
 
 
 //-----------------------------------------------------------------------------
-// FSkyWorthVRHMD, IStereoRendering Implementation
+// FSnapdragonVRHMD, IStereoRendering Implementation
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::IsStereoEnabled() const
+bool FSnapdragonVRHMD::IsStereoEnabled() const
 {
     return true;
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::EnableStereo(bool stereo)
+bool FSnapdragonVRHMD::EnableStereo(bool stereo)
 {
 
 	// GEngine->bForceDisableFrameRateSmoothing = stereo;
@@ -1016,9 +1015,9 @@ bool FSkyWorthVRHMD::EnableStereo(bool stereo)
 }
 
 #if ENGINE_MAJOR_VERSION == 5
-void FSkyWorthVRHMD::AdjustViewRect(int32 ViewIndex, int32& X, int32& Y, uint32& SizeX, uint32& SizeY) const
+void FSnapdragonVRHMD::AdjustViewRect(int32 ViewIndex, int32& X, int32& Y, uint32& SizeX, uint32& SizeY) const
 #else
-void FSkyWorthVRHMD::AdjustViewRect(EStereoscopicPass StereoPass, int32& X, int32& Y, uint32& SizeX, uint32& SizeY) const
+void FSnapdragonVRHMD::AdjustViewRect(EStereoscopicPass StereoPass, int32& X, int32& Y, uint32& SizeX, uint32& SizeY) const
 #endif
 {
 	if(!bIsMobileMultiViewEnabled)
@@ -1048,7 +1047,7 @@ void FSkyWorthVRHMD::AdjustViewRect(EStereoscopicPass StereoPass, int32& X, int3
 }
 
 //-----------------------------------------------------------------------------
-// void FSkyWorthVRHMD::CalculateStereoViewOffset(const EStereoscopicPass StereoPassType, FRotator& ViewRotation, const float WorldToMeters, FVector& ViewLocation)
+// void FSnapdragonVRHMD::CalculateStereoViewOffset(const EStereoscopicPass StereoPassType, FRotator& ViewRotation, const float WorldToMeters, FVector& ViewLocation)
 // {
 //     if( StereoPassType != eSSP_FULL)
 //     {
@@ -1056,72 +1055,86 @@ void FSkyWorthVRHMD::AdjustViewRect(EStereoscopicPass StereoPass, int32& X, int3
 //         const float PassOffset = (StereoPassType == eSSP_LEFT_EYE) ? -EyeOffset : EyeOffset;
 //         ViewLocation += ViewRotation.Quaternion().RotateVector(FVector(0,PassOffset,0));
 
-// 		//UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::CalculateStereoViewOffset x:%f, y:%f, z:%f"), ViewLocation.X, ViewLocation.Y, ViewLocation.Z);
+// 		//UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::CalculateStereoViewOffset x:%f, y:%f, z:%f"), ViewLocation.X, ViewLocation.Y, ViewLocation.Z);
 //     }
 // }
 
 //-----------------------------------------------------------------------------
 #if ENGINE_MAJOR_VERSION == 5
-FMatrix FSkyWorthVRHMD::GetStereoProjectionMatrix(const int32 ViewIndex) const
+FMatrix FSnapdragonVRHMD::GetStereoProjectionMatrix(const int32 ViewIndex) const
 #else
-FMatrix FSkyWorthVRHMD::GetStereoProjectionMatrix(const EStereoscopicPass StereoPassType) const
+FMatrix FSnapdragonVRHMD::GetStereoProjectionMatrix(const EStereoscopicPass StereoPassType) const
 #endif
 {
-	 sxrDeviceInfo di = sxrGetDeviceInfo();
+	// GSXRDeviceInfo di = SC::GSXR_nativeGetDeviceInfo();
 
-#if ENGINE_MAJOR_VERSION == 5
-	 sxrViewFrustum Frustum = (ViewIndex == eSSE_LEFT_EYE) ? di.leftEyeFrustum : di.rightEyeFrustum;
-#else
-	 sxrViewFrustum Frustum = (StereoPassType == eSSP_LEFT_EYE) ? di.leftEyeFrustum : di.rightEyeFrustum;
+	// GSXRViewFrustum Frustum = (StereoPassType == eSSP_LEFT_EYE) ? di.leftEyeFrustum : di.rightEyeFrustum;
 
-#endif
+	// float InvNearZ = 1.0f / Frustum.near;
 
-	 float InvNearZ = 1.0f / Frustum.near;
+	// float Right = Frustum.right * InvNearZ;
+	// float Left = Frustum.left * InvNearZ;
+	// float Bottom = Frustum.bottom * InvNearZ;
+	// float Top = Frustum.top * InvNearZ;
 
-	 float Right = Frustum.right * InvNearZ;
-	 float Left = Frustum.left * InvNearZ;
-	 float Bottom = Frustum.bottom * InvNearZ;
-	 float Top = Frustum.top * InvNearZ;
+	// float ZNear = GNearClippingPlane;
 
-	 float ZNear = GNearClippingPlane;
+	// float SumRL = (Right + Left);
+	// float SumTB = (Top + Bottom);
+	// float InvRL = (1.0f / (Right - Left));
+	// float InvTB = (1.0f / (Top - Bottom));
 
-	 float SumRL = (Right + Left);
-	 float SumTB = (Top + Bottom);
-	 float InvRL = (1.0f / (Right - Left));
-	 float InvTB = (1.0f / (Top - Bottom));
+	// return FMatrix(
+	// 	FPlane((2.0f * InvRL), 0.0f, 0.0f, 0.0f),
+	// 	FPlane(0.0f, (2.0f * InvTB), 0.0f, 0.0f),
+	// 	FPlane((SumRL * InvRL), (SumTB * InvTB), 0.0f, 1.0f),
+	// 	FPlane(0.0f, 0.0f, ZNear, 0.0f)
+	// );
 
-	 return FMatrix(
-	 	FPlane((2.0f * InvRL), 0.0f, 0.0f, 0.0f),
-	 	FPlane(0.0f, (2.0f * InvTB), 0.0f, 0.0f),
-	 	FPlane((SumRL * InvRL), (SumTB * InvTB), 0.0f, 1.0f),
-	 	FPlane(0.0f, 0.0f, ZNear, 0.0f)
-	 );
+	float HFov,VFov;
+	float ZNear = GNearClippingPlane;
+	GetFieldOfView(HFov,VFov);
+	float Left = -FPlatformMath::Tan(HFov/2);
+	float Right = FPlatformMath::Tan(HFov/2);
+	float Top = FPlatformMath::Tan(VFov/2);
+	float Bottom = -FPlatformMath::Tan(VFov/2);
+	float SumRL = (Right + Left);
+	float SumTB = (Top + Bottom);
+	float InvRL = (1.0f / (Right - Left));
+	float InvTB = (1.0f / (Top - Bottom));
+	FMatrix ProjectionMatrix = FMatrix(
+			FPlane((2.0f * InvRL), 0.0f, 0.0f, 0.0f),
+			FPlane(0.0f, (2.0f * InvTB), 0.0f, 0.0f),
+			FPlane((SumRL * -InvRL), (SumTB * -InvTB), 0.0f, 1.0f),
+			FPlane(0.0f, 0.0f, ZNear, 0.0f)
+		);
+	return ProjectionMatrix;
 }
 
-FIntPoint FSkyWorthVRHMD::GetIdealRenderTargetSize() const
+FIntPoint FSnapdragonVRHMD::GetIdealRenderTargetSize() const
 {
 	// UE_LOG(LogSVR,Log,TEXT("xmh GetIdealRenderTargetSize:(%d,%d)"),RenderTargetSize.X,RenderTargetSize.Y)
 	return RenderTargetSize;
 }
 
 //-----------------------------------------------------------------------------
-// void FSkyWorthVRHMD::InitCanvasFromView(FSceneView* InView, UCanvas* Canvas)
+// void FSnapdragonVRHMD::InitCanvasFromView(FSceneView* InView, UCanvas* Canvas)
 // {
 //     //Do Nothing
 // }
 
 //-----------------------------------------------------------------------------
 #if ENGINE_MAJOR_VERSION == 5
-void FSkyWorthVRHMD::GetEyeRenderParams_RenderThread(const struct FHeadMountedDisplayPassContext& Context, FVector2D& EyeToSrcUVScaleValue, FVector2D& EyeToSrcUVOffsetValue) const
+void FSnapdragonVRHMD::GetEyeRenderParams_RenderThread(const struct FHeadMountedDisplayPassContext& Context, FVector2D& EyeToSrcUVScaleValue, FVector2D& EyeToSrcUVOffsetValue) const
 #else
-void FSkyWorthVRHMD::GetEyeRenderParams_RenderThread(const FRenderingCompositePassContext& Context, FVector2D& EyeToSrcUVScaleValue, FVector2D& EyeToSrcUVOffsetValue) const
+void FSnapdragonVRHMD::GetEyeRenderParams_RenderThread(const FRenderingCompositePassContext& Context, FVector2D& EyeToSrcUVScaleValue, FVector2D& EyeToSrcUVOffsetValue) const
 #endif
 {
-#if ENGINE_MAJOR_VERSION == 5
+	#if ENGINE_MAJOR_VERSION == 5
 	if (Context.View.StereoViewIndex == eSSE_LEFT_EYE)
-#else
+	#else
 	if (Context.View.StereoPass == eSSP_LEFT_EYE)
-#endif
+	#endif
 	{
 		EyeToSrcUVOffsetValue.X = 0.0f;
 		EyeToSrcUVOffsetValue.Y = 0.0f;
@@ -1143,7 +1156,7 @@ void FSkyWorthVRHMD::GetEyeRenderParams_RenderThread(const FRenderingCompositePa
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::CalculateRenderTargetSize(const class FViewport& Viewport, uint32& InOutSizeX, uint32& InOutSizeY)
+void FSnapdragonVRHMD::CalculateRenderTargetSize(const class FViewport& Viewport, uint32& InOutSizeX, uint32& InOutSizeY)
 {
     check(IsInGameThread());
 
@@ -1152,7 +1165,7 @@ void FSkyWorthVRHMD::CalculateRenderTargetSize(const class FViewport& Viewport, 
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::NeedReAllocateViewportRenderTarget(const FViewport& Viewport)
+bool FSnapdragonVRHMD::NeedReAllocateViewportRenderTarget(const FViewport& Viewport)
 {
     check(IsInGameThread());
 
@@ -1167,87 +1180,122 @@ bool FSkyWorthVRHMD::NeedReAllocateViewportRenderTarget(const FViewport& Viewpor
     CalculateRenderTargetSize(Viewport, NewSizeX, NewSizeY);
     if (NewSizeX != RTSize.X || NewSizeY != RTSize.Y)
     {
-		// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::NeedReAllocateViewportRenderTarget returns true"));
+		// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::NeedReAllocateViewportRenderTarget returns true"));
 		return true;
     }
     
-	// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::NeedReAllocateViewportRenderTarget returns false"));
+	// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::NeedReAllocateViewportRenderTarget returns false"));
 	return false;
 }
 
 //-----------------------------------------------------------------------------
-//bool FSkyWorthVRHMD::ShouldUseSeparateRenderTarget() const
+//bool FSnapdragonVRHMD::ShouldUseSeparateRenderTarget() const
 //{
 //
-//	//UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::ShouldUseSeparateRenderTarget() called"));
+//	//UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::ShouldUseSeparateRenderTarget() called"));
 //    check(IsInGameThread());
 //    return IsStereoEnabled();
 //}
 
 //-----------------------------------------------------------------------------
-//void FSkyWorthVRHMD::UpdateViewport(bool bUseSeparateRenderTarget, const FViewport& InViewport, SViewport* ViewportWidget)
+//void FSnapdragonVRHMD::UpdateViewport(bool bUseSeparateRenderTarget, const FViewport& InViewport, SViewport* ViewportWidget)
 //{
 //    check(IsInGameThread());
 //    FRHIViewport* const ViewportRHI = InViewport.GetViewportRHI().GetReference();
 //
-//	// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::UpdateViewport 1"));
+//	// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::UpdateViewport 1"));
 //
 //    if (!IsStereoEnabled())
 //    {
 //        if (!bUseSeparateRenderTarget)
 //        {
 //            ViewportRHI->SetCustomPresent(nullptr);
-//			// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::UpdateViewport 2"));
+//			// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::UpdateViewport 2"));
 //
 //        }
 //        return;
 //    }
-//	// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::UpdateViewport 3"));
-//	pSkyWorthVRBridge->UpdateViewport(InViewport, ViewportRHI);
+//	// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::UpdateViewport 3"));
+//	pSnapdragonVRBridge->UpdateViewport(InViewport, ViewportRHI);
 //}
 
 //-----------------------------------------------------------------------------
-// FSkyWorthVRHMD, ISceneViewExtension Implementation
+// FSnapdragonVRHMD, ISceneViewExtension Implementation
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::SetupViewFamily(FSceneViewFamily& InViewFamily) 
+void FSnapdragonVRHMD::SetupViewFamily(FSceneViewFamily& InViewFamily) 
 {
 #if WITH_EDITOR
 	InViewFamily.EngineShowFlags.SetScreenPercentage(false);
 #endif
 
-	// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::SetupViewFamily() and stereo is %s"), InViewFamily.EngineShowFlags.StereoRendering ? TEXT("enabled"):TEXT("disabled"));
+	// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::SetupViewFamily() and stereo is %s"), InViewFamily.EngineShowFlags.StereoRendering ? TEXT("enabled"):TEXT("disabled"));
+
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::SetupView(FSceneViewFamily& InViewFamily, FSceneView& InView)
+void FSnapdragonVRHMD::SetupView(FSceneViewFamily& InViewFamily, FSceneView& InView)
 {
+   
  	//InView.ViewRect = EyeRenderViewport[EyeIndex];
-	// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::SetupView()"));
+	// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::SetupView()"));
+
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::BeginRenderViewFamily(FSceneViewFamily& InViewFamily)
+void FSnapdragonVRHMD::BeginRenderViewFamily(FSceneViewFamily& InViewFamily)
 {
 
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::PreRenderViewFamily_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneViewFamily& InViewFamily)
+void FSnapdragonVRHMD::PreRenderViewFamily_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneViewFamily& InViewFamily)
 {
     check(IsInRenderingThread());
 
 	// RBF - I suspect this has to be rewritten
 
-	UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::PreRenderViewFamily_RenderThread()"));
+	UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::PreRenderViewFamily_RenderThread()"));
 
-    // pSkyWorthVRBridge->BeginRendering(RHICmdList, InViewFamily);
+    // pSnapdragonVRBridge->BeginRendering(RHICmdList, InViewFamily);
 	ExecuteOnRHIThread([this]()
 	{
 		BeginFrame_RHIThread();
 		PreRenderFrame_RHIThread();
 	});
+
+/*
+	const FSceneView* MainView = InViewFamily.Views[0];
+	const float WorldToMetersScale = MainView->WorldToMetersScale;
+
+	FSnapdragonVRHMDCustomPresent::FPoseStateFrame* PoseState = pSnapdragonVRBridge->PoseHistory.Get();
+	if (!PoseState)
+	{
+		return;
+	}
+
+	FQuat OldOrientation;
+	FVector OldPosition;
+	UE_LOG(LogSVR, Log, TEXT("ApplyLateUpdate-OldPose - RenderThread PoseTimestamp %lld ExpectedTime %f Frame %d", PoseState->Pose.poseTimeStampNs, PoseState->Pose.expectedDisplayTimeNs, PoseState->FrameNumber);
+	PoseToOrientationAndPosition(PoseState->Pose.pose, OldOrientation, OldPosition, WorldToMetersScale);
+	const FTransform OldRelativeTransform(OldOrientation, OldPosition);
+
+	sxrHeadPoseState HeadPoseState;
+	GetHeadPoseState(&HeadPoseState);
+
+	UE_LOG(LogSVR, Log, TEXT("ApplyLateUpdate-NewPose - RenderThread PoseTimestamp %lld ExpectedTime %f Frame %d", PoseState->Pose.poseTimeStampNs, PoseState->Pose.expectedDisplayTimeNs, PoseState->FrameNumber);
+	const sxrHeadPose Pose = HeadPoseState.pose;
+
+	PoseState->Pose = HeadPoseState;
+
+	FQuat NewOrientation;
+	FVector NewPosition;
+	PoseToOrientationAndPosition(Pose, NewOrientation, NewPosition, WorldToMetersScale);
+	const FTransform NewRelativeTransform(NewOrientation, NewPosition);
+
+	ApplyLateUpdate(InViewFamily.Scene, OldRelativeTransform, NewRelativeTransform);
+*/
 }
-void FSkyWorthVRHMD::PostRenderViewFamily_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneViewFamily& InViewFamily)
+void FSnapdragonVRHMD::PostRenderViewFamily_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneViewFamily& InViewFamily)
 {
 	/**
 	* Allows to render content after the 3D content scene, useful for debugging
@@ -1260,32 +1308,31 @@ void FSkyWorthVRHMD::PostRenderViewFamily_RenderThread(FRHICommandListImmediate&
 	
 }
 #if ENGINE_MINOR_VERSION < 27 && ENGINE_MAJOR_VERSION < 5
-bool FSkyWorthVRHMD::IsActiveThisFrame(FViewport* InViewport) const
+bool FSnapdragonVRHMD::IsActiveThisFrame(FViewport* InViewport) const
 {
 	return GEngine && GEngine->IsStereoscopic3D(InViewport);
 }
 #else
-bool FSkyWorthVRHMD::IsActiveThisFrame_Internal(const FSceneViewExtensionContext& Context) const
+bool FSnapdragonVRHMD::IsActiveThisFrame_Internal(const FSceneViewExtensionContext& Context) const
 {
 	return GEngine && GEngine->IsStereoscopic3D(Context.Viewport);
 }
 #endif
 
 #if ENGINE_MINOR_VERSION > 25 || ENGINE_MAJOR_VERSION == 5
-bool FSkyWorthVRHMD::AllocateRenderTargetTexture(uint32 Index, uint32 SizeX, uint32 SizeY, uint8 Format, uint32 NumMips, ETextureCreateFlags Flags, ETextureCreateFlags TargetableTextureFlags, FTexture2DRHIRef& OutTargetableTexture, FTexture2DRHIRef& OutShaderResourceTexture, uint32 NumSamples)
+bool FSnapdragonVRHMD::AllocateRenderTargetTexture(uint32 Index, uint32 SizeX, uint32 SizeY, uint8 Format, uint32 NumMips, ETextureCreateFlags Flags, ETextureCreateFlags TargetableTextureFlags, FTexture2DRHIRef& OutTargetableTexture, FTexture2DRHIRef& OutShaderResourceTexture, uint32 NumSamples)
 #else
-bool FSkyWorthVRHMD::AllocateRenderTargetTexture(uint32 Index, uint32 SizeX, uint32 SizeY, uint8 Format, uint32 NumMips, uint32 Flags, uint32 TargetableTextureFlags, FTexture2DRHIRef& OutTargetableTexture, FTexture2DRHIRef& OutShaderResourceTexture, uint32 NumSamples /*= 1*/)
+bool FSnapdragonVRHMD::AllocateRenderTargetTexture(uint32 Index, uint32 SizeX, uint32 SizeY, uint8 Format, uint32 NumMips, uint32 Flags, uint32 TargetableTextureFlags, FTexture2DRHIRef& OutTargetableTexture, FTexture2DRHIRef& OutShaderResourceTexture, uint32 NumSamples /*= 1*/)
 #endif
 {
-	UE_LOG(LogSVR, Log, TEXT("Use SwapChain"));
-	initGLExt();
+	UE_LOG(LogSVR,Log,TEXT("Use SwapChain"));
 	TArray<uint32_t>TextureResources;
-	TextureResources.SetNum(TextureQueueLength);
+	TextureResources.SetNum(TextureQueueLength);		
 	for (int i = 0; i < TextureQueueLength; ++i)
 	{
 		GLuint TextureID = 0;
 		glGenTextures(1, &TextureID);
-		GLenum textureType = bIsMobileMultiViewEnabled ? GL_TEXTURE_2D_ARRAY : GL_TEXTURE_2D;
+		GLenum textureType = bIsMobileMultiViewEnabled ? GL_TEXTURE_2D_ARRAY : GL_TEXTURE_2D;			
 		glBindTexture(textureType, TextureID);
 		if (bIsMobileMultiViewEnabled) {
 			glTexStorage3D(textureType, 1, GL_RGBA8, SizeX, SizeY, 2);
@@ -1294,45 +1341,35 @@ bool FSkyWorthVRHMD::AllocateRenderTargetTexture(uint32 Index, uint32 SizeX, uin
 			glTexStorage2D(textureType, 1, GL_RGBA8, SizeX, SizeY);
 		}
 		glTexParameteri(textureType, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(textureType, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexParameteri(textureType, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(textureType, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-
-		if (bEnableFoveation)
-		{
-			glTexParameteri(textureType,
-				GL_TEXTURE_FOVEATED_FEATURE_BITS_QCOM,
-				GL_FOVEATION_ENABLE_BIT_QCOM | GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM);
-		}
-		/*glTexParameteri(textureType, GL_TEXTURE_PREVIOUS_SOURCE_TEXTURE_QCOM, 0);
-		glTexParameterf(textureType, GL_TEXTURE_FOVEATED_MIN_PIXEL_DENSITY_QCOM, 0.0625f);*/
+        glTexParameteri(textureType, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(textureType, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(textureType, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		// GLfloat color[4]={0,0,0,1};
-		// glTexParameterfv(textureType,GL_TEXTURE_BORDER_COLOR,color);
+        // glTexParameterfv(textureType,GL_TEXTURE_BORDER_COLOR,color);
 		glBindTexture(textureType, 0);
 		TextureResources[i] = TextureID;
-		UE_LOG(LogSVR, Log, TEXT("TextureResources[%d]:%d,siez(%d,%d)"), i, TextureResources[i], SizeX, SizeY);
-	}
-	RenderBridge->CreateSwapChain(EPixelFormat(PF_R8G8B8A8), SizeX, SizeY, bIsMobileMultiViewEnabled ? 2 : 1, NumMips, NumSamples, Flags, TargetableTextureFlags, MobileMSAAValue, TextureResources);
-	OutTargetableTexture = OutShaderResourceTexture = RenderBridge->SwapChain->GetTexture2DArray() ? RenderBridge->SwapChain->GetTexture2DArray() : RenderBridge->SwapChain->GetTexture2D();
-	return true;
+		UE_LOG(LogSVR,Log,TEXT("TextureResources[%d]:%d,siez(%d,%d)"),i,TextureResources[i], SizeX, SizeY);
+	}	
+	RenderBridge->CreateSwapChain(EPixelFormat(PF_R8G8B8A8),SizeX,SizeY,bIsMobileMultiViewEnabled?2:1,NumMips,NumSamples,Flags,TargetableTextureFlags,MobileMSAAValue,TextureResources);
+	OutTargetableTexture = OutShaderResourceTexture =RenderBridge->SwapChain->GetTexture2DArray() ? RenderBridge->SwapChain->GetTexture2DArray() : RenderBridge->SwapChain->GetTexture2D();
+	return true;	
 }
 
-
-void FSkyWorthVRHMD::StartRendering_RHIThread()
+void FSnapdragonVRHMD::StartRendering_RHIThread()
 {
 	if(bStartRendering)
 		return;
 
 	UE_LOG(LogSVR, Log, TEXT("StartRendering ; InRenderThread = %s, InRHIThread = %s"), InRenderThread() ? TEXT("True") : TEXT("Flase"), IsInRHIThread() ? TEXT("True") : TEXT("Flase"));
 	bStartRendering = true;
-	uint32_t TrackingMode = kTrackingRotation | kTrackingPosition;
-	sxrSetTrackingMode(TrackingMode);
-    sxrBeginParams beginParams;
-    beginParams.cpuPerfLevel = sxrPerfLevel::kPerfMaximum;
-    beginParams.gpuPerfLevel = sxrPerfLevel::kPerfMaximum;
+	uint32_t TrackingMode = kGSXRTrackingRotation | kGSXRTrackingPosition;
+    SC::GSXR_nativeSetSlamType(TrackingMode);
+    GSXRBeginParams beginParams;
+    beginParams.cpuPerfLevel = GSXRPerfLevel::kGSXRPerfMaximum;
+    beginParams.gpuPerfLevel = GSXRPerfLevel::kGSXRPerfMaximum;
     beginParams.nativeWindow = AndroidEGL::GetInstance()->GetNativeWindow();
     beginParams.mainThreadId = gettid();
-    beginParams.colorSpace = kColorSpaceLinear;
+    beginParams.colorSpace = kGSXRColorSpaceLinear;
 
 	UE_LOG(LogSVR,Log,TEXT("xmh GSXR_nativeStartSlam: cpuPerfLevel = %d, gpuPerfLevel = %d, nativeWindow = %d, mainThreadId = %d, colorSpace = %d"),
 		beginParams.cpuPerfLevel,
@@ -1341,12 +1378,12 @@ void FSkyWorthVRHMD::StartRendering_RHIThread()
 		beginParams.mainThreadId,
 		beginParams.colorSpace);
 
-    SxrResult result = sxrBeginXr(&beginParams);
+    GSXRResult result = SC::GSXR_nativeStartSlam(&beginParams);
 	mFrameIndex = 0;
 	UE_LOG(LogSVR,Log,TEXT("GSXR_nativeStartSlam:%d"),result);
 }
 
-void FSkyWorthVRHMD::StopRendering_RHIThread()
+void FSnapdragonVRHMD::StopRendering_RHIThread()
 {
 	if(!bStartRendering)
 	{
@@ -1354,12 +1391,12 @@ void FSkyWorthVRHMD::StopRendering_RHIThread()
 	}
 	UE_LOG(LogSVR,Log,TEXT("xmh StopRendering_RHIThread"));
 	bStartRendering = false;
-	sxrEndXr();
+	SC::GSXR_nativeStopSlam();
 	// SC::GSXR_nativeShutdown();
 	// bInitialized = false;
 }
 
-void FSkyWorthVRHMD::BeginFrame_RHIThread()
+void FSnapdragonVRHMD::BeginFrame_RHIThread()
 {
 	if (!bStartRendering)
 	{
@@ -1374,7 +1411,7 @@ void FSkyWorthVRHMD::BeginFrame_RHIThread()
 	
 }
 
-void FSkyWorthVRHMD::PreRenderFrame_RHIThread()
+void FSnapdragonVRHMD::PreRenderFrame_RHIThread()
 {
 	if (!bStartRendering)
 	{
@@ -1382,11 +1419,11 @@ void FSkyWorthVRHMD::PreRenderFrame_RHIThread()
 	}
 	UpdateSensorData();
 }
-void FSkyWorthVRHMD::PostRenderFrame_RHIThread()
+void FSnapdragonVRHMD::PostRenderFrame_RHIThread()
 {
 
 }
-void CreateLayout(float centerX, float centerY, float radiusX, float radiusY, sxrLayoutCoords *pLayout)
+void CreateLayout(float centerX, float centerY, float radiusX, float radiusY, GSXRLayoutCoords *pLayout)
 {
 	// This is always in screen space so we want Z = 0 and W = 1
 	float lowerLeftPos[4] = { centerX - radiusX, centerY - radiusY, 0.0f, 1.0f };
@@ -1412,123 +1449,69 @@ void CreateLayout(float centerX, float centerY, float radiusX, float radiusY, sx
 	memcpy(pLayout->TransformMatrix, identTransform, sizeof(pLayout->TransformMatrix));
 }
 
-void FSkyWorthVRHMD::EndFrame_RHIThread()
+void FSnapdragonVRHMD::EndFrame_RHIThread()
 {
 	if(!bStartRendering)
 		return;
-	sxrFrameParams FrameParams;
+	GSXRFrameParams FrameParams;
 	memset(&FrameParams, 0, sizeof(FrameParams));
 
 	FrameParams.frameIndex = mFrameIndex;//GFrameNumber
-
-	float FoveationGainX, FoveationGainY, FoveationArea;
-
-	switch (FoveationLevel.GetValue())
-	{
-	case EFoveationLevel::Type::Low: {
-		FoveationGainX = 3.f * 2.f;
-		FoveationGainY = 3.f;
-		FoveationArea = 10.f; }break;
-	case EFoveationLevel::Type::Med: {
-		FoveationGainX = 4.f;
-		FoveationGainY = 4.f;
-		FoveationArea = 10.f; }break;
-	case EFoveationLevel::Type::High: {
-		FoveationGainX = 6.f;
-		FoveationGainY = 6.f;
-		FoveationArea = 10.f; }break;
-	case EFoveationLevel::Type::TopHigh: {
-		FoveationGainX = 8.f * 2.f;
-		FoveationGainY = 8.f;
-		FoveationArea = 0.f; }break;
-	}
-
 	if (bIsMobileMultiViewEnabled){
 		const FRHITexture2D* const SwapChainTexture = RenderBridge->SwapChain->GetTexture2DArray() ? RenderBridge->SwapChain->GetTexture2DArray() : RenderBridge->SwapChain->GetTexture2D();
-		FrameParams.renderLayers[0].imageType = kTypeTextureArray;
+		FrameParams.renderLayers[0].imageType = kGSXRTypeTextureArray;
 		FrameParams.renderLayers[0].imageHandle = *(GLuint *)SwapChainTexture->GetNativeResource();
 		CreateLayout(0.0f, 0.0f, 1.0f, 1.0f, &FrameParams.renderLayers[0].imageCoords);
-		FrameParams.renderLayers[0].eyeMask = kEyeMaskLeft;
-		FrameParams.renderLayers[0].layerFlags |= kLayerFlagOpaque;
+		FrameParams.renderLayers[0].eyeMask = kGSXREyeMaskLeft;
+		FrameParams.renderLayers[0].layerFlags |= kGSXRLayerFlagOpaque;
 
 		// Right Eye
-		FrameParams.renderLayers[1].imageType = kTypeTextureArray;
+		FrameParams.renderLayers[1].imageType = kGSXRTypeTextureArray;
 		FrameParams.renderLayers[1].imageHandle = *(GLuint *)SwapChainTexture->GetNativeResource();
 		CreateLayout(0.0f, 0.0f, 1.0f, 1.0f, &FrameParams.renderLayers[1].imageCoords);
-		FrameParams.renderLayers[1].eyeMask = kEyeMaskRight;
-		FrameParams.renderLayers[1].layerFlags |= kLayerFlagOpaque;
+		FrameParams.renderLayers[1].eyeMask = kGSXREyeMaskRight;
+		FrameParams.renderLayers[1].layerFlags |= kGSXRLayerFlagOpaque;
 		// UE_LOG(LogSVR, Log, TEXT("FOpenGLESCustomPresentSVR::SubmitFrame - rendering texture ID %d - from a texture array"), FrameParams.renderLayers[0].imageHandle);
-		
-		if (glTextureFoveationParametersQCOM == 0)
-		{
-			UE_LOG(LogSVR, Log, TEXT("glTextureFoveationParametersQCOM is not supported!"));
-		}
-		else
-		{
-			glTextureFoveationParametersQCOM(*(GLuint*)SwapChainTexture->GetNativeResource(), 0, 0, -0.5f, 0.f, FoveationGainX * 2.f, FoveationGainY, FoveationArea);
-			glTextureFoveationParametersQCOM(*(GLuint*)SwapChainTexture->GetNativeResource(), 0, 1, 0.5f, 0.f, FoveationGainX * 2.f, FoveationGainY, FoveationArea);
-		}
-	}
-	else
-	{
-
+	}else{
 		const FRHITexture2D* const SwapChainTexture = RenderBridge->SwapChain->GetTexture2D();
 		FrameParams.renderLayers[0].imageHandle = *(GLuint *)SwapChainTexture->GetNativeResource();
-		FrameParams.renderLayers[0].imageType = kTypeTexture;
+		FrameParams.renderLayers[0].imageType = kGSXRTypeTexture;
 		CreateLayout(0.0f, 0.0f, 1.0f, 1.0f, &FrameParams.renderLayers[0].imageCoords);
 		FrameParams.renderLayers[0].imageCoords.LowerUVs[2] = 0.5f;
 		FrameParams.renderLayers[0].imageCoords.UpperUVs[2] = 0.5f;
-		FrameParams.renderLayers[0].eyeMask = kEyeMaskLeft;
-		//FrameParams.renderLayers[0].layerFlags |= kLayerFlagOpaque;
+		FrameParams.renderLayers[0].eyeMask = kGSXREyeMaskLeft;
+		//FrameParams.renderLayers[0].layerFlags |= kGSXRLayerFlagOpaque;
 
 		FrameParams.renderLayers[1].imageHandle = *(GLuint *)SwapChainTexture->GetNativeResource();
-		FrameParams.renderLayers[1].imageType = kTypeTexture;
+		FrameParams.renderLayers[1].imageType = kGSXRTypeTexture;
 		CreateLayout(0.0f, 0.0f, 1.0f, 1.0f, &FrameParams.renderLayers[1].imageCoords);
 		FrameParams.renderLayers[1].imageCoords.LowerUVs[0] = 0.5f;
 		FrameParams.renderLayers[1].imageCoords.UpperUVs[0] = 0.5f;
-		FrameParams.renderLayers[1].eyeMask = kEyeMaskRight;
-		
-		//FrameParams.renderLayers[1].layerFlags |= kLayerFlagOpaque;
+		FrameParams.renderLayers[1].eyeMask = kGSXREyeMaskRight;
+		//FrameParams.renderLayers[1].layerFlags |= kGSXRLayerFlagOpaque;
 		// UE_LOG(LogSVR, Log, TEXT("FOpenGLESCustomPresentSVR::SubmitFrame - not using array"));
-
-		if (glTextureFoveationParametersQCOM == 0)
-		{
-			UE_LOG(LogSVR, Log, TEXT("glTextureFoveationParametersQCOM is not supported!"));
-		}
-		else
-		{
-			glTextureFoveationParametersQCOM(*(GLuint*)SwapChainTexture->GetNativeResource(), 0, 0, -0.5f, 0.f, FoveationGainX * 2.f, FoveationGainY, FoveationArea);
-			glTextureFoveationParametersQCOM(*(GLuint*)SwapChainTexture->GetNativeResource(), 0, 1, 0.5f, 0.f, FoveationGainX * 2.f, FoveationGainY, FoveationArea);
-		}
 	}
-
-	
-	
-	FrameParams.frameOptions = kDisableChromaticCorrection;
+	FrameParams.frameOptions = kGSXRDisableChromaticCorrection;
 	FrameParams.headPoseState = CurrentFrame_RenderThread.headPoseState;
 	UE_LOG(LogSVR,Log,TEXT("headPoseState:(%f,%f,%f),(%f,%f,%f,%f)"),FrameParams.headPoseState.pose.position.x,FrameParams.headPoseState.pose.position.y,FrameParams.headPoseState.pose.position.z,
 	FrameParams.headPoseState.pose.rotation.x,FrameParams.headPoseState.pose.rotation.y,FrameParams.headPoseState.pose.rotation.z,FrameParams.headPoseState.pose.rotation.w);
 	FrameParams.minVsyncs = 1;
-	UE_LOG(LogSVR,Log,TEXT("(%s) (Frame %d) SubmitFrame(mRenderPose) => Calling sxrSubmitFrame(Frame %d),imageHandle=%d"), IsInRenderingThread() ? TEXT("Render") : TEXT("Game"), FrameParams.frameIndex, FrameParams.frameIndex,FrameParams.renderLayers[0].imageHandle);
+	UE_LOG(LogSVR,Log,TEXT("(%s) (Frame %d) SubmitFrame(mRenderPose) => Calling SC::GSXR_nativeSubmitDataFrame(Frame %d),imageHandle=%d"), IsInRenderingThread() ? TEXT("Render") : TEXT("Game"), FrameParams.frameIndex, FrameParams.frameIndex,FrameParams.renderLayers[0].imageHandle);
 	UE_LOG(LogSVR, Log, TEXT("SubmitFrame : frameIndex = %d"), FrameParams.frameIndex);
 	UE_LOG(LogSVR, Log, TEXT("SubmitFrame : minVsyncs = %d"), FrameParams.minVsyncs);
-
 	
-	
-	sxrSubmitFrame(&FrameParams);
-
-	
+	SC::GSXR_nativeSubmitDataFrame(&FrameParams);
+	RenderBridge->SwapChain->ReleaseCurrentImage_RHIThread();
 	mFrameIndex++;
 }
+//-----------------------------------------------------------------------------
+// FSnapdragonVRHMD Implementation
+//-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-// FSkyWorthVRHMD Implementation
+// FSnapdragonVRHMD Implementation
 //-----------------------------------------------------------------------------
-
-//-----------------------------------------------------------------------------
-// FSkyWorthVRHMD Implementation
-//-----------------------------------------------------------------------------
-FSkyWorthVRHMD::FSkyWorthVRHMD(const FAutoRegister& AutoRegister) :
+FSnapdragonVRHMD::FSnapdragonVRHMD(const FAutoRegister& AutoRegister) :
 	FHeadMountedDisplayBase(nullptr),
 	FSceneViewExtensionBase(AutoRegister),
 	bInitialized(false),
@@ -1554,11 +1537,7 @@ FSkyWorthVRHMD::FSkyWorthVRHMD(const FAutoRegister& AutoRegister) :
 
 	memset(&CachedEyePoseState, 0, sizeof(CachedEyePoseState));
 	memset(&CachedHeadPoseState, 0, sizeof(CachedHeadPoseState));
-	sxrSetting = GetMutableDefault<USXR_Settings>();
 
-	//m_MotionUtilsImple = new MotionUtilsImple(GJavaVM, GNativeAndroidApp->activity->clazz);
-
-	XRLoaderInit();
 	// New for VR in 4.19
 	static const auto PixelDensityCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("vr.PixelDensity"));
 	if (PixelDensityCVar)
@@ -1579,7 +1558,7 @@ FSkyWorthVRHMD::FSkyWorthVRHMD(const FAutoRegister& AutoRegister) :
 }
 
 #if ENGINE_MINOR_VERSION > 25 || ENGINE_MAJOR_VERSION ==5
-int32 FSkyWorthVRHMD::GetXRSystemFlags() const
+int32 FSnapdragonVRHMD::GetXRSystemFlags() const
 {
 	return EXRSystemFlags::IsHeadMounted;
 }
@@ -1587,46 +1566,46 @@ int32 FSkyWorthVRHMD::GetXRSystemFlags() const
 
 
 //-----------------------------------------------------------------------------
-FSkyWorthVRHMD::~FSkyWorthVRHMD()
+FSnapdragonVRHMD::~FSnapdragonVRHMD()
 {
-    UE_LOG(LogSVR, Log, TEXT("~FSkyWorthVRHMD()"));
+    UE_LOG(LogSVR, Log, TEXT("~FSnapdragonVRHMD()"));
 
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::IsInitialized() const
+bool FSnapdragonVRHMD::IsInitialized() const
 {
 	if (bInitialized)
 	{
-		UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::IsInitialized() is true"));
+		UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::IsInitialized() is true"));
 	}
 	else
 	{
-		UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::IsInitialized() is false"));
+		UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::IsInitialized() is false"));
 	}
 	return bInitialized;
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::InitializeExternalResources()
+bool FSnapdragonVRHMD::InitializeExternalResources()
 {
-	UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::InitializeExternalResources()"));
+	UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::InitializeExternalResources()"));
 
 	CVarPerfLevelCpu.AsVariable()->SetOnChangedCallback(FConsoleVariableDelegate::CreateStatic(&PerfLevelCpuOnChangeByCvar));
 	CVarPerfLevelGpu.AsVariable()->SetOnChangedCallback(FConsoleVariableDelegate::CreateStatic(&PerfLevelGpuOnChangeByCvar));
 
     extern struct android_app* GNativeAndroidApp;
 
-    sxrInitParams initParams;
+    GSXRInitParams initParams;
 
     initParams.javaVm = GJavaVM;
     initParams.javaEnv = FAndroidApplication::GetJavaEnv();
     initParams.javaActivityObject = GNativeAndroidApp->activity->clazz;
 
 //#if WITH_TELEMETRY
-//    if (sxrInitializeOptArgs(&initParams, TM_API_PTR) != SXR_ERROR_NONE)
+//    if (sxrInitializeOptArgs(&initParams, TM_API_PTR) != GSXR_ERROR_NONE)
 //#else
-    if (sxrInitialize(&initParams) != SXR_ERROR_NONE)
+    if (SC::GSXR_nativeInitSlam(&initParams) != GSXR_ERROR_NONE)
 //#endif
     {
         UE_LOG(LogSVR, Error, TEXT("sxrInitialize failed"));
@@ -1637,39 +1616,39 @@ bool FSkyWorthVRHMD::InitializeExternalResources()
         UE_LOG(LogSVR, Log, TEXT("sxrInitialize succeeeded"));
 
 		///StartWebHelper();
-        uint32 TrackingMode = kTrackingRotation | kTrackingPosition;
+        uint32 TrackingMode = kGSXRTrackingRotation | kGSXRTrackingPosition;
 		CVars::EyeTrackingEnabled = false;
         // if (CVars::EyeTrackingEnabled)
         // {
-        //     if ((sxrGetSupportedTrackingModes() & kTrackingEye) == 0)
+        //     if ((SC::GSXR_nativeGetSupportSlamMode() & kGSXRTrackingEye) == 0)
         //     {
 		// 		UE_LOG(LogSVR, Log, TEXT("Eye tracking is not supported on this device"));
         //         CVars::EyeTrackingEnabled = false;
         //     }
         //     else
         //     {
-        //         TrackingMode |= kTrackingEye;
+        //         TrackingMode |= kGSXRTrackingEye;
         //     }
         // }
 		UE_LOG(LogSVR,Log,TEXT("GSXR_nativeSetSlamType:%d"),TrackingMode);
-		sxrSetTrackingMode(TrackingMode);
+		SC::GSXR_nativeSetSlamType(TrackingMode);
         return true;
     }
 }
 
 //-----------------------------------------------------------------------------
-bool FSkyWorthVRHMD::Startup()
+bool FSnapdragonVRHMD::Startup()
 {
-    UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::Startup(); this=%x"), this);
+    UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::Startup(); this=%x"), this);
 
     bInitialized = InitializeExternalResources();
     if (!bInitialized)
     {
-		UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::Startup() - Initialization FAILED"), this);
+		UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::Startup() - Initialization FAILED"), this);
         return false;
     }
 
-	// pSkyWorthVRBridge = FSkyWorthVRHMDCustomPresent::Create(this);
+	// pSnapdragonVRBridge = FSnapdragonVRHMDCustomPresent::Create(this);
 	const FString HardwareDetails = FHardwareInfo::GetHardwareDetailsString();
 	const FString RHILookup = NAME_RHI.ToString() + TEXT("=");
 	if (!FParse::Value(*HardwareDetails, *RHILookup, RHIString))
@@ -1677,7 +1656,7 @@ bool FSkyWorthVRHMD::Startup()
 		UE_LOG(LogSVR,Log,TEXT("Get RHI String failed!"));
 		check(0);
 	}
-	
+
 	if (RHIString == TEXT("OpenGL"))
 	{
 		RenderBridge = CreateRenderBridge_OpenGL(this);
@@ -1688,10 +1667,10 @@ bool FSkyWorthVRHMD::Startup()
 	}
 	UE_LOG(LogSVR,Log,TEXT("RHIString: %s"),*RHIString);
     //Register life cycle delegates
-    FCoreDelegates::ApplicationWillEnterBackgroundDelegate.AddRaw(this, &FSkyWorthVRHMD::ApplicationWillEnterBackgroundDelegate);
-    FCoreDelegates::ApplicationWillDeactivateDelegate.AddRaw(this, &FSkyWorthVRHMD::ApplicationWillDeactivateDelegate);//calls to this delegate are often (always?) paired with a call to ApplicationWillEnterBackgroundDelegate(), but cover the possibility that only this delegate is called
-    FCoreDelegates::ApplicationHasEnteredForegroundDelegate.AddRaw(this, &FSkyWorthVRHMD::ApplicationHasEnteredForegroundDelegate);
-    FCoreDelegates::ApplicationHasReactivatedDelegate.AddRaw(this, &FSkyWorthVRHMD::ApplicationHasReactivatedDelegate);//calls to this delegate are often (always?) paired with a call to ApplicationHasEnteredForegroundDelegate(), but cover the possibility that only this delegate is called
+    FCoreDelegates::ApplicationWillEnterBackgroundDelegate.AddRaw(this, &FSnapdragonVRHMD::ApplicationWillEnterBackgroundDelegate);
+    FCoreDelegates::ApplicationWillDeactivateDelegate.AddRaw(this, &FSnapdragonVRHMD::ApplicationWillDeactivateDelegate);//calls to this delegate are often (always?) paired with a call to ApplicationWillEnterBackgroundDelegate(), but cover the possibility that only this delegate is called
+    FCoreDelegates::ApplicationHasEnteredForegroundDelegate.AddRaw(this, &FSnapdragonVRHMD::ApplicationHasEnteredForegroundDelegate);
+    FCoreDelegates::ApplicationHasReactivatedDelegate.AddRaw(this, &FSnapdragonVRHMD::ApplicationHasReactivatedDelegate);//calls to this delegate are often (always?) paired with a call to ApplicationHasEnteredForegroundDelegate(), but cover the possibility that only this delegate is called
 
     //don't bother with ApplicationWillTerminateDelegate() -- "There is no guarantee that this will ever be called on a mobile device, save state when ApplicationWillEnterBackgroundDelegate is called instead." -- https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Misc/FCoreDelegates/ApplicationWillTerminateDelegate/index.html --June 10, 2016
     //OnExit() and OnPreExit() are not documented as being called on mobile -- https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Misc/FCoreDelegates/OnExit/index.html and https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Misc/FCoreDelegates/OnPreExit/index.html --June 10, 2016
@@ -1719,7 +1698,7 @@ bool FSkyWorthVRHMD::Startup()
 #endif
 	UE_LOG(LogSVR,Log,TEXT("bIsMobileMultiViewEnabled = %d"),bIsMobileMultiViewEnabled);
 
-	sxrDeviceInfo DeviceInfo = sxrGetDeviceInfo();
+	GSXRDeviceInfo DeviceInfo = SC::GSXR_nativeGetDeviceInfo();
 	if (!bIsMobileMultiViewEnabled) {
 		RenderTargetSize.X = DeviceInfo.targetEyeWidthPixels * 2;
 		RenderTargetSize.Y = DeviceInfo.targetEyeHeightPixels;
@@ -1741,7 +1720,7 @@ bool FSkyWorthVRHMD::Startup()
 		RenderTargetSize.X = static_cast<uint32>(FMath::CeilToInt(CVarMobileContentScaleFactor->GetFloat() * RenderTargetSize.X));
 		RenderTargetSize.Y = static_cast<uint32>(FMath::CeilToInt(CVarMobileContentScaleFactor->GetFloat() * RenderTargetSize.Y));
 
-		UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::Startup(): r.MobileContentScaleFactor = %f -> eye buffer size is now = %u x %u"),
+		UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::Startup(): r.MobileContentScaleFactor = %f -> eye buffer size is now = %u x %u"),
 			CVarMobileContentScaleFactor->GetFloat(), RenderTargetSize.X, RenderTargetSize.Y);
 	}
 // <- CTORNE
@@ -1762,28 +1741,21 @@ bool FSkyWorthVRHMD::Startup()
 	// eye tracking
 	static IConsoleVariable* CETEVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.SVR.EyeTrackingEnabled"));
 	CETEVar->Set(false);
-	bEnableFoveation = sxrSetting->bEnableFoveation;
-	UE_LOG(LogSVR, Log, TEXT("bEnableFoveation is %d"), bEnableFoveation);
-	FoveationLevel = sxrSetting->FoveationLevel;
-	UE_LOG(LogSVR, Log, TEXT("FoveationLevel is %d"), FoveationLevel.GetValue());
-#if ENGINE_MAJOR_VERSION == 5
-	MobileMSAAValue = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.Mobile.AntiAliasing"))->GetValueOnAnyThread() == 3;
-#else
+
 	MobileMSAAValue = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileMSAA"))->GetValueOnAnyThread();
-#endif
 	UE_LOG(LogSVR, Log, TEXT("MSAA = %d"), MobileMSAAValue);
 	return true;
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::ApplicationWillEnterBackgroundDelegate()
+void FSnapdragonVRHMD::ApplicationWillEnterBackgroundDelegate()
 {
-    UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::ApplicationWillEnterBackgroundDelegate"));
+    UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::ApplicationWillEnterBackgroundDelegate"));
     CleanupIfNecessary();
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::CleanupIfNecessary()
+void FSnapdragonVRHMD::CleanupIfNecessary()
 {
 	if(!bResumed)
 	{
@@ -1791,14 +1763,14 @@ void FSkyWorthVRHMD::CleanupIfNecessary()
 	}
     bResumed = false;
 
-    // if (pSkyWorthVRBridge->bInVRMode)
+    // if (pSnapdragonVRBridge->bInVRMode)
     // {
-    //     UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::CleanupIfNecessary(): sxrEndXr() sxrShutdown()"));
+    //     UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::CleanupIfNecessary(): sxrEndXr() sxrShutdown()"));
 
     //     //stop consuming resources for VR until the app is resumed
-	// 	sxrEndXr();
+	// 	SC::GSXR_nativeStopSlam();
     //     SC::GSXR_nativeShutdown();
-    //     pSkyWorthVRBridge->bInVRMode = false;
+    //     pSnapdragonVRBridge->bInVRMode = false;
     //     bInitialized = false;
     // }
 	///StopWebHelper();
@@ -1813,30 +1785,30 @@ void FSkyWorthVRHMD::CleanupIfNecessary()
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::ApplicationWillDeactivateDelegate()
+void FSnapdragonVRHMD::ApplicationWillDeactivateDelegate()
 {
-    UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::ApplicationWillDeactivateDelegate"));
+    UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::ApplicationWillDeactivateDelegate"));
     CleanupIfNecessary();
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::ApplicationHasReactivatedDelegate()
+void FSnapdragonVRHMD::ApplicationHasReactivatedDelegate()
 {
-    UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::ApplicationHasReactivatedDelegate"));
+    UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::ApplicationHasReactivatedDelegate"));
     InitializeIfNecessaryOnResume();
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::ApplicationHasEnteredForegroundDelegate()
+void FSnapdragonVRHMD::ApplicationHasEnteredForegroundDelegate()
 {
-    UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::ApplicationHasEnteredForegroundDelegate"));
+    UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::ApplicationHasEnteredForegroundDelegate"));
     InitializeIfNecessaryOnResume();
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::InitializeIfNecessaryOnResume()
+void FSnapdragonVRHMD::InitializeIfNecessaryOnResume()
 {
-    if (!bInitialized)//Upon application launch, FSkyWorthVRHMD::Startup() must initialize immediately, but Android lifecycle "resume" delegates will also be called -- don't double-initialize
+    if (!bInitialized)//Upon application launch, FSnapdragonVRHMD::Startup() must initialize immediately, but Android lifecycle "resume" delegates will also be called -- don't double-initialize
     {
         bInitialized = InitializeExternalResources();
     }
@@ -1853,30 +1825,30 @@ void FSkyWorthVRHMD::InitializeIfNecessaryOnResume()
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::SetCPUAndGPULevels(const int32 InCPULevel, const int32 InGPULevel) const
+void FSnapdragonVRHMD::SetCPUAndGPULevels(const int32 InCPULevel, const int32 InGPULevel) const
 {
-	const sxrPerfLevel SvrPerfLevelCPU = static_cast<const sxrPerfLevel>(InCPULevel);
-	const sxrPerfLevel SvrPerfLevelGPU = static_cast<const sxrPerfLevel>(InGPULevel);
+	const GSXRPerfLevel SvrPerfLevelCPU = static_cast<const GSXRPerfLevel>(InCPULevel);
+	const GSXRPerfLevel SvrPerfLevelGPU = static_cast<const GSXRPerfLevel>(InGPULevel);
 	check(IsPerfLevelValid(SvrPerfLevelCPU));
 	check(IsPerfLevelValid(SvrPerfLevelGPU));
 
 	//sxr performance levels can be manipulated by render or game thread, so prevent race conditions
-	// FScopeLock ScopeLock(&pSkyWorthVRBridge->PerfLevelCriticalSection);
+	// FScopeLock ScopeLock(&pSnapdragonVRBridge->PerfLevelCriticalSection);
 	// PerfLevelCpuLastSet = SvrPerfLevelCPU;
 	// PerfLevelGpuLastSet = SvrPerfLevelGPU;
 // CTORNE ->
-	// if (pSkyWorthVRBridge->bInVRMode)
+	// if (pSnapdragonVRBridge->bInVRMode)
 	// {
-	// 	sxrSetPerformanceLevels(PerfLevelCpuLastSet, PerfLevelGpuLastSet);
-	// 	FSkyWorthVRHMD::PerfLevelLog(TEXT("SetCPUAndGPULevels"), PerfLevelCpuLastSet, PerfLevelGpuLastSet);
+	// 	SC::GSXR_nativeSetPerformanceLevels(PerfLevelCpuLastSet, PerfLevelGpuLastSet);
+	// 	FSnapdragonVRHMD::PerfLevelLog(TEXT("SetCPUAndGPULevels"), PerfLevelCpuLastSet, PerfLevelGpuLastSet);
 	// }
 // <- CTORNE
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::PoseToOrientationAndPosition(const sxrHeadPose& Pose, FQuat& OutCurrentOrientation, FVector& OutCurrentPosition, const float WorldToMetersScale)
+void FSnapdragonVRHMD::PoseToOrientationAndPosition(const GSXRHeadPose& Pose, FQuat& OutCurrentOrientation, FVector& OutCurrentPosition, const float WorldToMetersScale)
 {
-	// UE_LOG(LogSVR, Log, TEXT("FSkyWorthVRHMD::PoseToOrientationAndPosition()"));
+	// UE_LOG(LogSVR, Log, TEXT("FSnapdragonVRHMD::PoseToOrientationAndPosition()"));
 
     if (bStartRendering)
     {
@@ -1896,23 +1868,23 @@ void FSkyWorthVRHMD::PoseToOrientationAndPosition(const sxrHeadPose& Pose, FQuat
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::BeginVRMode()
+void FSnapdragonVRHMD::BeginVRMode()
 {
-    // check(pSkyWorthVRBridge);
+    // check(pSnapdragonVRBridge);
 	//FAndroidMisc::UnlockAndroidWindow();
     // if (IsInRenderingThread())
     // {
-    //     pSkyWorthVRBridge->DoBeginVR();
+    //     pSnapdragonVRBridge->DoBeginVR();
     // }
     // else
     // {
-	// 	FSkyWorthVRHMDCustomPresent* m_SkyWorthVRBridge = pSkyWorthVRBridge;
+	// 	FSnapdragonVRHMDCustomPresent* m_SnapdragonVRBridge = pSnapdragonVRBridge;
 
 	// 	ENQUEUE_RENDER_COMMAND(BeginVRMode)
 	// 	(
-	// 		[m_SkyWorthVRBridge](FRHICommandListImmediate& RHICmdList)
+	// 		[m_SnapdragonVRBridge](FRHICommandListImmediate& RHICmdList)
 	// 		{
-	// 			m_SkyWorthVRBridge->DoBeginVR();
+	// 			m_SnapdragonVRBridge->DoBeginVR();
 	// 		}
 	// 	);
 
@@ -1921,22 +1893,22 @@ void FSkyWorthVRHMD::BeginVRMode()
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::EndVRMode()
+void FSnapdragonVRHMD::EndVRMode()
 {
 }
 
 //-----------------------------------------------------------------------------
-// uint32 FSkyWorthVRHMD::GetNumberOfBufferedFrames() const
+// uint32 FSnapdragonVRHMD::GetNumberOfBufferedFrames() const
 // {
 //     return 1;
 // }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::SetupOcclusionMeshes()
+void FSnapdragonVRHMD::SetupOcclusionMeshes()
 {
 	int TriangleCount = 0;
 	int VertexStride = 0;
-	if (sxrGetOcclusionMesh(kLeftEye, &TriangleCount, &VertexStride, nullptr) != SXR_ERROR_NONE)
+	if (SC::GSXR_nativeGetOcclusionMesh(kGSXRLeftEye, &TriangleCount, &VertexStride, nullptr) != GSXR_ERROR_NONE)
 	{
 		return;
 	}
@@ -1949,8 +1921,8 @@ void FSkyWorthVRHMD::SetupOcclusionMeshes()
 
 		float* const LeftEyeMesh = new float[VertexDataSize];
 		float* const RightEyeMesh = new float[VertexDataSize];
-		sxrGetOcclusionMesh(kLeftEye, &TriangleCount, &VertexStride, LeftEyeMesh);
-		sxrGetOcclusionMesh(kRightEye, &TriangleCount, &VertexStride, RightEyeMesh);
+		SC::GSXR_nativeGetOcclusionMesh(kGSXRLeftEye, &TriangleCount, &VertexStride, LeftEyeMesh);
+		SC::GSXR_nativeGetOcclusionMesh(kGSXRRightEye, &TriangleCount, &VertexStride, RightEyeMesh);
 
 		FVector2D* const LeftEyePositions = new FVector2D[VertexCount];
 		FVector2D* const RightEyePositions = new FVector2D[VertexCount];
@@ -1990,9 +1962,9 @@ void FSkyWorthVRHMD::SetupOcclusionMeshes()
 }
 
 //-----------------------------------------------------------------------------
-sxrDeviceInfo FSkyWorthVRHMD::GetDeviceInfo()
+GSXRDeviceInfo FSnapdragonVRHMD::GetDeviceInfo()
 {
-	sxrDeviceInfo di = sxrGetDeviceInfo();
+	GSXRDeviceInfo di = SC::GSXR_nativeGetDeviceInfo();
 	
 	// if any coordinate system transformations are necessary, they should go here
 
@@ -2000,7 +1972,7 @@ sxrDeviceInfo FSkyWorthVRHMD::GetDeviceInfo()
 }
 
 
-uint32 FSkyWorthVRHMD::CreateLayer(const IStereoLayers::FLayerDesc& InLayerDesc)
+uint32 FSnapdragonVRHMD::CreateLayer(const IStereoLayers::FLayerDesc& InLayerDesc)
 {
 	check(IsInGameThread());
 	const uint32 LayerId = CurrentLayerId++;
@@ -2009,14 +1981,14 @@ uint32 FSkyWorthVRHMD::CreateLayer(const IStereoLayers::FLayerDesc& InLayerDesc)
 	return LayerId;
 }
 
-void FSkyWorthVRHMD::DestroyLayer(uint32 LayerId)
+void FSnapdragonVRHMD::DestroyLayer(uint32 LayerId)
 {
 	check(IsInGameThread());
 	UE_LOG(LogSVR,Log,TEXT(" DestroyLayer %d"),LayerId);
 	LayerMap.Remove(LayerId);
 }
 
-void FSkyWorthVRHMD::SetLayerDesc(uint32 LayerId, const IStereoLayers::FLayerDesc& InLayerDesc)
+void FSnapdragonVRHMD::SetLayerDesc(uint32 LayerId, const IStereoLayers::FLayerDesc& InLayerDesc)
 {
 	check(IsInGameThread());
 	FGSXRLayerPtr* LayerFound = LayerMap.Find(LayerId);
@@ -2027,7 +1999,7 @@ void FSkyWorthVRHMD::SetLayerDesc(uint32 LayerId, const IStereoLayers::FLayerDes
 	}
 }
 
-bool FSkyWorthVRHMD::GetLayerDesc(uint32 LayerId, IStereoLayers::FLayerDesc& OutLayerDesc)
+bool FSnapdragonVRHMD::GetLayerDesc(uint32 LayerId, IStereoLayers::FLayerDesc& OutLayerDesc)
 {
 	check(IsInGameThread());
 	FGSXRLayerPtr* LayerFound = LayerMap.Find(LayerId);
@@ -2038,16 +2010,16 @@ bool FSkyWorthVRHMD::GetLayerDesc(uint32 LayerId, IStereoLayers::FLayerDesc& Out
 	}
 	return false;
 }
-void FSkyWorthVRHMD::MarkTextureForUpdate(uint32 LayerId)
+void FSnapdragonVRHMD::MarkTextureForUpdate(uint32 LayerId)
 {
 	check(IsInGameThread());
 }
 
-void FSkyWorthVRHMD::UpdateSplashScreen()
+void FSnapdragonVRHMD::UpdateSplashScreen()
 {
 }
 
-IStereoLayers::FLayerDesc FSkyWorthVRHMD::GetDebugCanvasLayerDesc(FTextureRHIRef Texture)
+IStereoLayers::FLayerDesc FSnapdragonVRHMD::GetDebugCanvasLayerDesc(FTextureRHIRef Texture)
 {
 	IStereoLayers::FLayerDesc StereoLayerDesc;
 	StereoLayerDesc.Priority = INT_MAX;
@@ -2066,12 +2038,12 @@ IStereoLayers::FLayerDesc FSkyWorthVRHMD::GetDebugCanvasLayerDesc(FTextureRHIRef
 	StereoLayerDesc.Flags |= IStereoLayers::ELayerFlags::LAYER_FLAG_QUAD_PRESERVE_TEX_RATIO;
 	return StereoLayerDesc;
 }
-void FSkyWorthVRHMD::GetAllocatedTexture(uint32 LayerId, FTextureRHIRef& Texture, FTextureRHIRef& LeftTexture)
+void FSnapdragonVRHMD::GetAllocatedTexture(uint32 LayerId, FTextureRHIRef& Texture, FTextureRHIRef& LeftTexture)
 {
 	Texture = LeftTexture = nullptr;
 }
 
-FXRRenderBridge* FSkyWorthVRHMD::GetActiveRenderBridge_GameThread(bool bUseSeparateRenderTarget)
+FXRRenderBridge* FSnapdragonVRHMD::GetActiveRenderBridge_GameThread(bool bUseSeparateRenderTarget)
 {
 	return RenderBridge;
 }
@@ -2079,7 +2051,7 @@ FXRRenderBridge* FSkyWorthVRHMD::GetActiveRenderBridge_GameThread(bool bUseSepar
 
 #if 0 // webhelper stuff
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::StartWebHelper()
+void FSnapdragonVRHMD::StartWebHelper()
 {
 	JNIEnv* Env = FAndroidApplication::GetJavaEnv();
 	extern struct android_app* GNativeAndroidApp;
@@ -2110,7 +2082,7 @@ void FSkyWorthVRHMD::StartWebHelper()
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::SendMessage(const int32 score) const
+void FSnapdragonVRHMD::SendMessage(const int32 score) const
 {
 	char buf[64];
 	sprintf(buf, "%d", score);
@@ -2126,7 +2098,7 @@ void FSkyWorthVRHMD::SendMessage(const int32 score) const
 }
 
 //-----------------------------------------------------------------------------
-void FSkyWorthVRHMD::StopWebHelper()
+void FSnapdragonVRHMD::StopWebHelper()
 {
 
 	JNIEnv* Env = FAndroidApplication::GetJavaEnv();
@@ -2140,4 +2112,4 @@ void FSkyWorthVRHMD::StopWebHelper()
 
 #endif // webhelper
 
-#endif //SkyWorthVR_HMD_SUPPORTED_PLATFORMS
+#endif //SNAPDRAGONVR_HMD_SUPPORTED_PLATFORMS

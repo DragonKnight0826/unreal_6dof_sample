@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- GoogleVRHMD plugin additions -->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<!-- init section is always evaluated once per architecture -->
+	<init>
+		<log text="SkyworthXRLib init" />
+	</init>
+
+	<!-- optional updates applied to AndroidManifest.xml -->
+	<androidManifestUpdates>
+		<addPermission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+		<loopElements tag="application">
+			<addElements tag="application">
+				<meta-data android:name="invision.display_mode" android:value="vr" />
+			</addElements>
+		</loopElements>
+	</androidManifestUpdates>
+	
+	<!-- optional files or directories to copy to Intermediate/Android/APK -->
+	<resourceCopies>
+      <copyFile src="$S(PluginDir)/../../../Source/ThirdParty/SkyworthXRLib/SkyworthXRLib/ExtLibs/libgsxrfe-release.aar"
+					  dst="$S(BuildDir)/libs/libgsxrfe-release.aar" />
+		
+	</resourceCopies>
+
+	<buildGradleAdditions>
+		<insert>
+			android
+			{
+				repositories
+				{
+					flatDir{dirs 'src/main/libs/'}
+				}
+			}
+			
+			dependencies 
+			{
+				implementation (name: 'libgsxrfe-release',ext:'aar')
+			}
+		</insert>
+	</buildGradleAdditions>
+</root>

@@ -10,55 +10,54 @@
 
 #include "XRRenderTargetManager.h"
 #include "IStereoLayers.h"
-#include "ISkyWorthVRHMDModule.h"
+#include "ISnapdragonVRHMDModule.h"
 #include "XRRenderBridge.h"
 #include "FGSXRRenderBridge.h"
 #include "FGSXRStereoLayer.h"
-#include "SXR_Settings.h"
 
 //#if WITH_TELEMETRY
 //#include "ThirdParty/Telemetry/3.0.1.903/include/rad_tmgpu.h"
 //#endif
 
-#include "sxrApi.h"
+#include "SCGSXRApi.h"
 #include "SceneViewExtension.h"
+#include "SnapdragonVRHMD_CustomPresent.h"
 
 #define TextureQueueLength 3
-DECLARE_LOG_CATEGORY_EXTERN(LogSVR, Log, All);
 
 struct FFrameSensorState
 {
 	float PredictedDisplayTime;
 	FVector Position;
 	FQuat Orientation;
-	sxrHeadPoseState headPoseState;
+	GSXRHeadPoseState headPoseState;
 };
 
 //-----------------------------------------------------------------------------
-class FSkyWorthVRHMD : public FHeadMountedDisplayBase, public FXRRenderTargetManager, public FSceneViewExtensionBase, public IStereoLayers, public IXRInput
+class FSnapdragonVRHMD : public FHeadMountedDisplayBase, public FXRRenderTargetManager, public FSceneViewExtensionBase, public IStereoLayers, public IXRInput
 {
 public:
 	//friend class FSceneViewExtensions;
 
-	FSkyWorthVRHMD(const FAutoRegister&);
+	FSnapdragonVRHMD(const FAutoRegister&);
 	/** Constructor */
-//	FSkyWorthVRHMD(ISkyWorthVRHMDPlugin* SkyWorthPlugin);
+//	FSnapdragonVRHMD(ISnapdragonVRHMDPlugin* SnapdragonPlugin);
 
 
-	virtual ~FSkyWorthVRHMD();
+	virtual ~FSnapdragonVRHMD();
 
 
-	static FSkyWorthVRHMD* GetSkyWorthHMD();
+	static FSnapdragonVRHMD* GetSnapdragonHMD();
 
 	//////////////////////////////////////////////////////
 	// IXRSystemIdentifier
 	//////////////////////////////////////////////////////
 
-	static const FName SkyWorthVRHMDSystemName;
+	static const FName SnapdragonVRHMDSystemName;
 
 	virtual FName GetSystemName() const override
 	{
-		return SkyWorthVRHMDSystemName;
+		return SnapdragonVRHMDSystemName;
 	}
 #if ENGINE_MINOR_VERSION >25 || ENGINE_MAJOR_VERSION == 5
 	virtual int32 GetXRSystemFlags() const override;
@@ -69,7 +68,7 @@ public:
 	/** Update current HMD pose */
 	void UpdatePoses();
 
-	void UpdateMyPoses(sxrHeadPoseState& HPS);  // RBF TODO - this is a temp function which (currently) returns the immediate pose
+	void UpdateMyPoses(GSXRHeadPoseState& HPS);  // RBF TODO - this is a temp function which (currently) returns the immediate pose
 
 	//////////////////////////////////////////////////////
 	// IXRTrackingSystem
@@ -182,7 +181,7 @@ public:
 	/**
 	* Returns currently active custom present.
 	*/
-	//virtual FRHICustomPresent* GetCustomPresent() override { return pSkyWorthVRBridge;	}
+	//virtual FRHICustomPresent* GetCustomPresent() override { return pSnapdragonVRBridge;	}
 
 	virtual IStereoRenderTargetManager* GetRenderTargetManager() override { return this; }
 
@@ -233,7 +232,6 @@ public:
 	virtual bool DoesSupportPositionalTracking() const override;
 
 	/**
-	* 
 	* If the system currently has valid tracking positions. If not supported at all, returns false.
 	*/
 	virtual bool HasValidTrackingPosition();
@@ -453,7 +451,7 @@ public:
 	*
 	* @return true if the pose state returned is valid
 	*/
-	bool GetEyePoseState(int32 DeviceId, sxrEyePoseState& EyePoseState);
+	bool GetEyePoseState(int32 DeviceId, GSXREyePoseState& EyePoseState);
 
 public:
 
@@ -464,35 +462,35 @@ public:
 	bool IsStandaloneStereoOnlyDevice() const { return bIsStandaloneStereoOnlyDevice; }
 #endif
 
-	#if SkyWorthVR_HMD_SUPPORTED_PLATFORMS
+	#if SNAPDRAGONVR_HMD_SUPPORTED_PLATFORMS
 	// Performance helper functions
-	static void PerfLevelLog(const TCHAR* const InPrefix, enum sxrPerfLevel InPerfLevelCpu, enum sxrPerfLevel InPerfLevelGpu);
-	static bool PerfLevelsLastSetByCvarRead( enum sxrPerfLevel* OutPerfLevelCpuCurrent, enum sxrPerfLevel* OutPerfLevelGpuCurrent,
-											const enum sxrPerfLevel InPerfLevelCpuDefault,const enum sxrPerfLevel InPerfLevelGpuDefault);
-	static enum sxrPerfLevel GetCVarSkyWorthVrPerfLevelDefault();
-	static void PerfLevelCpuWrite(const enum sxrPerfLevel InPerfLevel);
-	static void PerfLevelGpuWrite(const enum sxrPerfLevel InPerfLevel);
-	#endif //  SkyWorthVR_HMD_SUPPORTED_PLATFORMS
-	static enum sxrPerfLevel PerfLevelCpuLastSet, PerfLevelGpuLastSet;
+	static void PerfLevelLog(const TCHAR* const InPrefix, enum GSXRPerfLevel InPerfLevelCpu, enum GSXRPerfLevel InPerfLevelGpu);
+	static bool PerfLevelsLastSetByCvarRead( enum GSXRPerfLevel* OutPerfLevelCpuCurrent, enum GSXRPerfLevel* OutPerfLevelGpuCurrent,
+											const enum GSXRPerfLevel InPerfLevelCpuDefault,const enum GSXRPerfLevel InPerfLevelGpuDefault);
+	static enum GSXRPerfLevel GetCVarSnapdragonVrPerfLevelDefault();
+	static void PerfLevelCpuWrite(const enum GSXRPerfLevel InPerfLevel);
+	static void PerfLevelGpuWrite(const enum GSXRPerfLevel InPerfLevel);
+	#endif //  SNAPDRAGONVR_HMD_SUPPORTED_PLATFORMS
+	static enum GSXRPerfLevel PerfLevelCpuLastSet, PerfLevelGpuLastSet;
 
 	// Eye tracking helper functions
 
-	// pass in an sxrEyePoseState eye status member
-	bool isEyeGazePointValid(int32_t& Status)      const { return  0 != (Status & sxrEyePoseStatus::kGazePointValid); }
-	bool isEyeGazeDirectionValid(int32_t& Status)  const { return  0 != (Status & sxrEyePoseStatus::kGazeVectorValid); }
-	bool isEyeOpenessValid(int32_t& Status)        const { return  0 != (Status & sxrEyePoseStatus::kEyeOpennessValid); }
-	bool isEyePupilDialationValid(int32_t& Status) const { return  0 != (Status & sxrEyePoseStatus::kEyePupilDilationValid); }
-	bool isEyePositionGuideValid(int32_t& Status)  const { return  0 != (Status & sxrEyePoseStatus::kEyePositionGuideValid); }
+	// pass in an GSXREyePoseState eye status member
+	bool isEyeGazePointValid(int32_t& Status)      const { return  0 != (Status & GSXREyePoseStatus::kGSXRGazePointValid); }
+	bool isEyeGazeDirectionValid(int32_t& Status)  const { return  0 != (Status & GSXREyePoseStatus::kGSXRGazeVectorValid); }
+	bool isEyeOpenessValid(int32_t& Status)        const { return  0 != (Status & GSXREyePoseStatus::kGSXREyeOpennessValid); }
+	bool isEyePupilDialationValid(int32_t& Status) const { return  0 != (Status & GSXREyePoseStatus::kGSXREyePupilDilationValid); }
+	bool isEyePositionGuideValid(int32_t& Status)  const { return  0 != (Status & GSXREyePoseStatus::kGSXREyePositionGuideValid); }
 
 	bool isEyeTrackingEnabled() const;
 	void enableEyeTracking(bool b);
 
 	// get the cached eye pose
-	const sxrEyePoseState&  GetLatestEyePoseState();
+	const GSXREyePoseState&  GetLatestEyePoseState();
 	// get the cached head pose
-	bool GetHeadPoseState(sxrHeadPoseState& HeadPoseState);
+	bool GetHeadPoseState(GSXRHeadPoseState& HeadPoseState);
 
-	sxrHeadPoseState GetCachedHeadPoseState() { return CachedHeadPoseState; }
+	GSXRHeadPoseState GetCachedHeadPoseState() { return CachedHeadPoseState; }
 private:
 	bool Startup();
 	void InitializeIfNecessaryOnResume();
@@ -503,7 +501,7 @@ private:
 	void ApplicationHasEnteredForegroundDelegate();
 	void ApplicationHasReactivatedDelegate();
 
-	void PoseToOrientationAndPosition(const sxrHeadPose& Pose, FQuat& CurrentOrientation, FVector& CurrentPosition, const float WorldToMetersScale);
+	void PoseToOrientationAndPosition(const GSXRHeadPose& Pose, FQuat& CurrentOrientation, FVector& CurrentPosition, const float WorldToMetersScale);
 
 	void BeginVRMode();
 	void EndVRMode();
@@ -514,21 +512,21 @@ private:
 	
 	
 	// wrapper around the raw device info - use this to get massaged values
-	sxrDeviceInfo GetDeviceInfo();
+	GSXRDeviceInfo GetDeviceInfo();
 
 	// these are similar to what Oculus has
 
 	//  Converts vector from SXR space to Unreal
 	//  transform position SVR to UE4 (-Z[2], X[0], Y[1])
-	FORCEINLINE FVector SXR2Unreal_FVector(const sxrVector3& InVec)
+	FORCEINLINE FVector SXR2Unreal_FVector(const GSXRVector3& InVec)
 	{
 		return FVector(-InVec.z, InVec.x, InVec.y);
 	}
 
 	//  Converts vector from Unreal space to SXR 
-	FORCEINLINE sxrVector3 Unreal2SXR_Vector(const FVector& InVec)
+	FORCEINLINE GSXRVector3 Unreal2SXR_Vector(const FVector& InVec)
 	{
-		return sxrVector3{ (float)InVec.Y, (float)InVec.Z, (float)-InVec.X };
+		return GSXRVector3{ (float)InVec.Y, (float)InVec.Z, (float)-InVec.X };
 	}
 
 	// which view array index is this pass for?
@@ -571,10 +569,10 @@ private:
 	bool bIsStandaloneStereoOnlyDevice;
 #endif
 	
-// #if SkyWorthVR_HMD_SUPPORTED_PLATFORMS
-// 	TRefCountPtr<FSkyWorthVRHMDCustomPresent> pSkyWorthVRBridge;
+// #if SNAPDRAGONVR_HMD_SUPPORTED_PLATFORMS
+// 	TRefCountPtr<FSnapdragonVRHMDCustomPresent> pSnapdragonVRBridge;
 // #else
-// 	FRHICustomPresent* pSkyWorthVRBridge = nullptr;
+// 	FRHICustomPresent* pSnapdragonVRBridge = nullptr;
 // #endif
 
 	bool InitializeExternalResources();
@@ -588,8 +586,8 @@ private:
     FQuat					DeltaControlOrientation; 
 	FQuat					BaseOrientation;
 	double					LastSensorTime;
-	sxrEyePoseState			CachedEyePoseState;
-	sxrHeadPoseState		CachedHeadPoseState;
+	GSXREyePoseState			CachedEyePoseState;
+	GSXRHeadPoseState		CachedHeadPoseState;
 
 	FIntPoint				RenderTargetSize;
 	FIntRect				EyeRenderViewport[2];
@@ -599,8 +597,6 @@ private:
 	uint32 CurrentLayerId;
 	bool bIsMobileMultiViewEnabled;
 	bool bStartRendering;
-	bool bEnableFoveation;
-	TEnumAsByte<EFoveationLevel::Type> FoveationLevel;
 	int32 MobileMSAAValue;
 	FString RHIString;
 	uint32_t mFrameIndex;
@@ -619,8 +615,6 @@ public:
 	FFrameSensorState LastFrame_RenderThread;
 	FFrameSensorState LastFrame_GameThread;
 	bool bIsEndGameFrame;
-	class USXR_Settings* sxrSetting;
-	class UMotionUtilsImple* m_MotionUtilsImple;
 };
 
 //bool InRenderThread()
